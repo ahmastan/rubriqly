@@ -1,18 +1,21 @@
 import base64
+import json
 from datetime import datetime, timedelta
 from decimal import Decimal
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import Session
+from test_scan import completion, rubric_answer
 
 from rubriqly.config import Settings
 from rubriqly.db import utcnow
 from rubriqly.main import create_app
 from rubriqly.models import RubricScanUsage, User
-from rubriqly.scan import MockScanClient, ScanError, ScanImage, ScanResult
+from rubriqly.scan import GatewayScanClient, MockScanClient, ScanError, ScanImage, ScanResult
 from rubriqly.scan.client import DEMO_RUBRIC
 
 PASSWORD = "maple river quiet lamp"
@@ -320,3 +323,63 @@ def test_deleting_the_account_deletes_its_scan_rows(
     response = student.request("DELETE", "/api/auth/me", json={"password": PASSWORD})
     assert response.status_code in (200, 204)
     assert rows(db) == []
+
+
+# The whole path: the API with the real gateway client, only Vercel's replies faked
+
+
+def gateway_scanner(*replies: httpx.Response) -> tuple[GatewayScanClient, list[httpx.Request]]:
+    sent: list[httpx.Request] = []
+
+    def reply(request: httpx.Request) -> httpx.Response:
+        sent.append(request)
+        return replies[len(sent) - 1]
+
+    async def no_wait(_seconds: float) -> None:
+        pass
+
+    live = Settings(_env_file=None, scan_mode="live", ai_gateway_api_key="test-gateway-key")
+    http = httpx.AsyncClient(transport=httpx.MockTransport(reply))
+    return GatewayScanClient(live, http=http, sleep=no_wait), sent
+
+
+def test_a_real_scan_through_the_api(student: TestClient, db: Session) -> None:
+    scanner, sent = gateway_scanner(httpx.Response(200, json=completion(rubric_answer())))
+    student.app.state.scanner = scanner  # type: ignore[attr-defined]
+
+    response = scan(student, PNG)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["rubric"]["levels"] == ["Starting", "Developing", "Advanced"]
+    assert body["model"] == "google/gemini-2.5-flash"
+    assert body["quota"]["used"] == 1
+
+    request = json.loads(sent[0].content)
+    assert request["messages"][1]["content"][1]["image_url"]["url"].startswith(
+        "data:image/png;base64,"
+    )
+    [row] = rows(db)
+    assert (row.status, row.input_tokens, row.output_tokens) == ("ok", 1800, 900)
+    assert row.cost_usd == Decimal("0.0042")
+
+
+def test_a_model_the_gateway_refuses_is_a_setup_problem(student: TestClient, db: Session) -> None:
+    # How the gateway refuses a model the account can't use.
+    refused = httpx.Response(
+        403,
+        json={
+            "error": {
+                "message": "Free tier users do not have access to this model.",
+                "type": "no_providers_available",
+            }
+        },
+    )
+    scanner, _ = gateway_scanner(refused)
+    student.app.state.scanner = scanner  # type: ignore[attr-defined]
+
+    response = scan(student)
+    assert response.status_code == 503
+    assert error_code(response) == "scan_not_configured"
+    assert "Free tier" not in response.json()["detail"]["message"]
+    assert rows(db)[0].status == "failed"
+    assert student.get("/api/rubric-scans/quota").json()["used"] == 0

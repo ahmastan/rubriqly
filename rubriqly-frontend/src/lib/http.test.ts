@@ -54,6 +54,25 @@ describe('apiFetch', () => {
   })
 })
 
+describe('errors without the backend’s details', () => {
+  it.each([
+    [502, 'Rubriqly’s server is starting up or busy. Please try again in a minute.'],
+    [504, 'Rubriqly’s server is starting up or busy. Please try again in a minute.'],
+    [413, 'That’s too large to send. Try a smaller file or photo.'],
+    [500, 'Something went wrong on our side. Please try again in a minute.'],
+  ])('%i gets a message that says what to do', async (status, message) => {
+    const original = globalThis.fetch
+    globalThis.fetch = async () => new Response('Bad Gateway', { status })
+    try {
+      await expect(
+        apiFetch('/api/rubric-scans', { method: 'POST', body: {} }),
+      ).rejects.toMatchObject({ status, code: `http_${status}`, message })
+    } finally {
+      globalThis.fetch = original
+    }
+  })
+})
+
 describe('safeNext', () => {
   it('only allows paths on this site', () => {
     expect(safeNext('/checks/chk_1?x=1')).toBe('/checks/chk_1?x=1')

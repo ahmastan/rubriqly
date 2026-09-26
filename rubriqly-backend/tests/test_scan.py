@@ -27,16 +27,16 @@ def rubric_answer(**changes: Any) -> dict[str, Any]:
     """What the model sends back for a 3-level rubric shown best level first (it forgot to flip)."""
     answer: dict[str, Any] = {
         "is_rubric": True,
-        "title": "Informal Essay Rubric",
+        "title": "Example Essay Rubric",
         "levels": [
-            {"name": "Expert", "points": "3"},
-            {"name": "Capable", "points": "2"},
-            {"name": "Beginner", "points": "1"},
+            {"name": "Advanced", "points": "3"},
+            {"name": "Developing", "points": "2"},
+            {"name": "Starting", "points": "1"},
         ],
         "criteria": [
             {
-                "name": "Quality of Writing",
-                "descriptors": ["Extraordinary style", "Little style", "No style"],
+                "name": "Voice",
+                "descriptors": ["A vivid, consistent voice", "Some voice", "No clear voice"],
                 "suggested_question": "How strong are the style, voice and organization?",
                 "suggested_tips": ["Keep it up.", "Add voice.", "Pick a style."],
             }
@@ -156,10 +156,14 @@ def test_model_comes_from_settings() -> None:
 def test_reads_the_rubric_lowest_level_first() -> None:
     result, _ = scan_with(ok())
     rubric = result.rubric
-    assert rubric.title == "Informal Essay Rubric"
+    assert rubric.title == "Example Essay Rubric"
     # The points went down (3, 2, 1), so everything is flipped to lowest first.
-    assert rubric.levels == ["Beginner", "Capable", "Expert"]
-    assert rubric.criteria[0].descriptors == ["No style", "Little style", "Extraordinary style"]
+    assert rubric.levels == ["Starting", "Developing", "Advanced"]
+    assert rubric.criteria[0].descriptors == [
+        "No clear voice",
+        "Some voice",
+        "A vivid, consistent voice",
+    ]
     assert rubric.criteria[0].suggested_tips == ["Pick a style.", "Add voice.", "Keep it up."]
     assert rubric.checklist[0].name == "Has a title"
     assert rubric.word_count is not None
@@ -205,14 +209,14 @@ def test_levels_without_points_keep_the_models_order() -> None:
 def test_empty_cells_stay_empty() -> None:
     criteria = [
         {
-            "name": "Quality of Writing",
-            "descriptors": ["", "Little style", "No style"],
+            "name": "Voice",
+            "descriptors": ["", "Some voice", "No clear voice"],
             "suggested_question": "?",
             "suggested_tips": ["a", "b", "c"],
         }
     ]
     result, _ = scan_with(ok(rubric_answer(criteria=criteria)))
-    assert result.rubric.criteria[0].descriptors == ["No style", "Little style", ""]
+    assert result.rubric.criteria[0].descriptors == ["No clear voice", "Some voice", ""]
 
 
 def test_a_photo_that_isnt_a_rubric_is_refused() -> None:
@@ -280,7 +284,7 @@ def test_cost_can_also_come_from_gateway_metadata() -> None:
 
 def test_fenced_json_is_accepted() -> None:
     result, _ = scan_with(ok("```json\n" + json.dumps(rubric_answer()) + "\n```"))
-    assert result.rubric.title == "Informal Essay Rubric"
+    assert result.rubric.title == "Example Essay Rubric"
 
 
 # Failures
@@ -289,7 +293,7 @@ def test_fenced_json_is_accepted() -> None:
 def test_retries_once_when_busy_then_succeeds() -> None:
     result, gateway = scan_with(httpx.Response(503, text="busy"), ok())
     assert len(gateway.requests) == 2
-    assert result.rubric.levels[0] == "Beginner"
+    assert result.rubric.levels[0] == "Starting"
 
 
 def test_gives_up_after_two_attempts() -> None:
@@ -316,7 +320,7 @@ def test_logs_never_contain_the_photo_the_rubric_or_the_key(
     assert "scan ok" in logged
     assert API_KEY not in logged
     assert base64.b64encode(PNG).decode("ascii") not in logged
-    assert "Extraordinary style" not in logged
+    assert "A vivid, consistent voice" not in logged
 
 
 # Mock and settings

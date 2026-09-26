@@ -15,10 +15,16 @@ export class ApiError extends Error {
   }
 }
 
+// A restarting or slow server answers through Render's forwarding without our usual details.
+const BUSY = 'Rubriqly’s server is starting up or busy. Please try again in a minute.'
 const FALLBACK_MESSAGES: Record<number, string> = {
   401: 'Please sign in to continue.',
+  413: 'That’s too large to send. Try a smaller file or photo.',
   422: 'Some of the details aren’t valid. Check them and try again.',
   429: 'Too many requests. Please wait a minute and try again.',
+  502: BUSY,
+  503: BUSY,
+  504: BUSY,
 }
 const GENERIC = 'Something went wrong on our side. Please try again in a minute.'
 const OFFLINE = 'Can’t reach Rubriqly right now. Check your connection and try again.'
