@@ -89,6 +89,13 @@ export const routes: RouteObject[] = [
         ),
       },
       {
+        path: '/rubrics/scan',
+        lazy: page(
+          () => import('./pages/RubricScanPage'),
+          (m) => m.RubricScanPage,
+        ),
+      },
+      {
         path: '/rubrics/new',
         lazy: page(
           () => import('./pages/BuilderPage'),

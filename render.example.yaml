@@ -81,6 +81,10 @@ services:
         value: production
       - key: JEV_MODE
         value: live # real, paid Jev calls (capped by the limits and the Vercel budget)
+      - key: SCAN_MODE
+        value: live # real, paid rubric-photo scans (about half a cent each, 5 per student a week)
+      # - key: SCAN_MODEL
+      #   value: google/gemini-2.5-flash # newer Gemini models need paid gateway credits
       - key: ALLOWED_ORIGINS
         value: https://YOUR-SITE.example,https://YOUR-SITE-SERVICE.onrender.com
       # The visitor's address for the sign-ups-per-network limit (checked after the first deploy).

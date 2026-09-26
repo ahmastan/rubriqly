@@ -112,6 +112,8 @@ describe('Landing page', () => {
       text.match(/not a grade|not grades|decides the grade|is this a grade/g)?.length,
     )
     expect(text).toContain('vercel ai gateway')
+    // The model that reads rubric photos is separate and never sees drafts.
+    expect(text).toContain('only receives your rubric photos')
     expect(text).toContain('made-up draft')
   })
 

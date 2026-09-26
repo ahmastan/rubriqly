@@ -13,6 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from rubriqly.config import Settings
+from rubriqly.gateway import GatewayFailure, post_with_retries
 from rubriqly.jev.models import (
     BooleanAnswer,
     BooleanQuestion,
@@ -68,7 +69,6 @@ class GatewayJevClient:
     """Real, paid Jev calls through Vercel AI Gateway."""
 
     MAX_ATTEMPTS = 3
-    RETRY_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
     def __init__(
         self,
@@ -116,52 +116,18 @@ class GatewayJevClient:
 
     async def _post_with_retries(self, payload: dict, headers: dict[str, str]) -> httpx.Response:
         """Retries timeouts, network errors, 429 and 5xx a couple of times before giving up."""
-        for attempt in range(1, self.MAX_ATTEMPTS + 1):
-            last_try = attempt == self.MAX_ATTEMPTS
-            failed: httpx.Response | None = None
-            try:
-                response = await self.http.post(self.url, json=payload, headers=headers)
-            except httpx.TimeoutException as error:
-                if last_try:
-                    raise JevError("unavailable", "timed out") from error
-                logger.warning("jev attempt %d timed out, retrying", attempt)
-            except httpx.TransportError as error:
-                if last_try:
-                    raise JevError("unavailable", f"network error: {error!r}") from error
-                logger.warning("jev attempt %d network error, retrying", attempt)
-            else:
-                if response.is_success:
-                    return response
-                if response.status_code not in self.RETRY_STATUSES or last_try:
-                    raise self._error_for(response)
-                logger.warning("jev attempt %d got %d, retrying", attempt, response.status_code)
-                failed = response
-            await self.sleep(self._retry_delay(attempt, failed))
-        raise AssertionError("unreachable")
-
-    @staticmethod
-    def _retry_delay(attempt: int, response: httpx.Response | None) -> float:
-        if response is not None:
-            try:
-                return min(float(response.headers.get("retry-after", "")), 5.0)
-            except ValueError:
-                pass
-        return 0.5 * 3 ** (attempt - 1)  # 0.5 s, then 1.5 s
-
-    @staticmethod
-    def _error_for(response: httpx.Response) -> JevError:
-        status = response.status_code
-        detail = f"HTTP {status}: {response.text[:500]}"
-        text = response.text.lower()
-        if status in (401, 403):
-            return JevError("not_configured", detail)
-        if status == 402 or "budget" in text or "insufficient" in text or "credit" in text:
-            return JevError("budget", detail)
-        if status == 429:
-            return JevError("rate_limited", detail)
-        if 400 <= status < 500:
-            return JevError("bad_request", detail)
-        return JevError("unavailable", detail)
+        try:
+            return await post_with_retries(
+                self.http,
+                self.url,
+                payload,
+                headers,
+                self.sleep,
+                attempts=self.MAX_ATTEMPTS,
+                name="jev",
+            )
+        except GatewayFailure as failure:
+            raise JevError(failure.kind, failure.detail) from failure
 
 
 def _unit(*parts: str) -> float:

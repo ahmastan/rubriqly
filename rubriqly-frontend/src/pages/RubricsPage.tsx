@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { Copy, Pencil, Plus } from 'lucide-react'
+import { Copy, Pencil, Plus, ScanLine } from 'lucide-react'
 import { Link } from 'react-router'
 import { listRubrics } from '../lib/api'
 import type { Rubric } from '../lib/types'
@@ -14,6 +14,10 @@ export function RubricsPage() {
     <div className="flex grow flex-col">
       <div className={pageBar}>
         <h1 className="m-0 grow text-base font-semibold">Rubrics</h1>
+        <Link to="/rubrics/scan" className={buttonStyles.secondary}>
+          <ScanLine size={16} strokeWidth={2} aria-hidden="true" />
+          Scan a rubric
+        </Link>
         <Link to="/rubrics/new" className={buttonStyles.primary}>
           <Plus size={16} strokeWidth={2} aria-hidden="true" />
           New rubric
@@ -25,13 +29,19 @@ export function RubricsPage() {
           {rubrics.isSuccess && mine.length === 0 ? (
             <div className="flex flex-col items-start gap-3 rounded-2xl border border-dashed border-field-border px-5 py-6">
               <p className="m-0 text-sm text-ink-2">
-                You haven’t made a rubric yet. Start from scratch, or copy a built-in rubric and
-                change it to match your assignment.
+                You haven’t made a rubric yet. Scan a photo of your teacher’s rubric, start from
+                scratch, or copy a built-in rubric and change it to match your assignment.
               </p>
-              <Link to="/rubrics/new" className={buttonStyles.secondary}>
-                <Plus size={15} aria-hidden="true" />
-                Build a rubric
-              </Link>
+              <div className="flex flex-wrap gap-2">
+                <Link to="/rubrics/scan" className={buttonStyles.secondary}>
+                  <ScanLine size={15} aria-hidden="true" />
+                  Scan a rubric
+                </Link>
+                <Link to="/rubrics/new" className={buttonStyles.secondary}>
+                  <Plus size={15} aria-hidden="true" />
+                  Build a rubric
+                </Link>
+              </div>
             </div>
           ) : (
             <CardGrid rubrics={mine} />

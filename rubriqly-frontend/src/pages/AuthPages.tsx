@@ -3,7 +3,7 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router'
 import { LogoMark } from '../components/Logo'
 import { ACCOUNT_KEY, MIN_AGE, safeNext, signIn, signUp, type Account } from '../lib/auth'
-import { useAccount } from '../lib/hooks'
+import { useAccount, useSlow } from '../lib/hooks'
 import { buttonStyles, cn, fieldStyles } from '../lib/ui'
 
 const field = cn(fieldStyles, 'h-11 text-[15px] font-normal')
@@ -46,6 +46,17 @@ function AuthLayout({ title, children }: { title: string; children: ReactNode })
         {children}
       </main>
     </div>
+  )
+}
+
+/** Under the button while a request takes a while: the free server may be waking up. */
+function WakingNote({ pending }: { pending: boolean }) {
+  const slow = useSlow(pending, 3000)
+  if (!slow) return null
+  return (
+    <p role="status" className="m-0 text-center text-[13px] text-ink-2">
+      Waking up Rubriqly’s server. This can take a minute or two.
+    </p>
   )
 }
 
@@ -102,6 +113,7 @@ export function SignInPage() {
         >
           {submit.isPending ? 'Signing in…' : 'Sign in'}
         </button>
+        <WakingNote pending={submit.isPending} />
       </form>
       <div className="flex flex-col gap-2 text-[13px] text-ink-2">
         <p className="m-0">
@@ -219,6 +231,7 @@ export function SignUpPage() {
         >
           {submit.isPending ? 'Creating your account…' : 'Create account'}
         </button>
+        <WakingNote pending={submit.isPending} />
       </form>
       <p className="m-0 text-[13px] text-ink-2">
         Already have an account?{' '}

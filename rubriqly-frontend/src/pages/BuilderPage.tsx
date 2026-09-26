@@ -16,8 +16,8 @@ import {
 import { CSS } from '@dnd-kit/utilities'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { GripVertical, Trash2 } from 'lucide-react'
-import { useState } from 'react'
+import { GripVertical, ScanLine, Trash2 } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
 import {
   useFieldArray,
   useForm,
@@ -25,7 +25,7 @@ import {
   type FieldErrors,
   type UseFormRegister,
 } from 'react-hook-form'
-import { Link, useLocation, useNavigate, useParams } from 'react-router'
+import { Link, useBlocker, useLocation, useNavigate, useParams } from 'react-router'
 import { LevelBar } from '../components/LevelBar'
 import { getRubric, saveRubric } from '../lib/api'
 import {
@@ -40,13 +40,27 @@ import {
 import { itemToJevQuestion, type BuilderItem } from '../lib/jevPayload'
 import { newId } from '../lib/localStore'
 import { hashUnit, mockCriterionScore } from '../lib/mockJev'
+import { isSuggested, scannedToBuilderValues, type Suggestions } from '../lib/rubricScan'
 import { rubricToYaml } from '../lib/rubricYaml'
 import { SAMPLE_ESSAY } from '../lib/sampleEssay'
 import { clampLevel } from '../lib/scoring'
+import type { ScanResponse } from '../lib/types'
 import { buttonStyles, cn, fieldStyles, pageBar, sectionLabel } from '../lib/ui'
+
+/** What the builder shows after a rubric scan, until it's saved. */
+interface ScanDetails {
+  suggestions: Suggestions
+  notes: string
+  demo: boolean
+}
+
+const SUGGESTED_HINT = 'scan-suggested-hint'
 
 export function BuilderPage() {
   const { rubricId } = useParams()
+  const location = useLocation()
+  // A scan arrives in the navigation state (it survives a reload of this page, not a new visit).
+  const scan = rubricId ? undefined : (location.state as { scan?: ScanResponse } | null)?.scan
   const rubric = useQuery({
     queryKey: ['rubric', rubricId],
     queryFn: () => getRubric(rubricId!),
@@ -67,11 +81,16 @@ export function BuilderPage() {
     )
   }
 
+  if (scan) {
+    const { values, suggestions } = scannedToBuilderValues(scan.rubric)
+    const details = { suggestions, notes: scan.rubric.notes, demo: scan.model === 'mock' }
+    return <BuilderForm key="scan" initial={values} scan={details} />
+  }
   const initial = rubric.data ? rubricToValues(rubric.data) : blankRubricValues()
   return <BuilderForm key={rubricId ?? 'new'} initial={initial} />
 }
 
-function BuilderForm({ initial }: { initial: BuilderValues }) {
+function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDetails }) {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -93,16 +112,32 @@ function BuilderForm({ initial }: { initial: BuilderValues }) {
   const [levels, version] = useWatch({ control, name: ['levels', 'version'] })
   const items = useWatch({ control, name: 'items' })
 
+  const savedScan = useRef(false)
   const save = useMutation({
     mutationFn: (values: BuilderValues) =>
       saveRubric(valuesToRubric(values, values.id || newId(slugify(values.title)))),
     onSuccess: (saved) => {
+      savedScan.current = true
       reset(rubricToValues(saved))
       void queryClient.invalidateQueries({ queryKey: ['rubrics'] })
       queryClient.setQueryData(['rubric', saved.id], saved)
       navigate(`/rubrics/${saved.id}/edit`, { replace: true, state: { saved: true } })
     },
   })
+
+  // A scanned rubric used up one of the week's scans: don't lose it to a stray click.
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      Boolean(scan) && !savedScan.current && currentLocation.pathname !== nextLocation.pathname,
+  )
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return
+    const leave = window.confirm(
+      'Leave without saving this rubric? You’d need to scan it again, which uses one of your weekly scans.',
+    )
+    if (leave) blocker.proceed()
+    else blocker.reset()
+  }, [blocker])
 
   const onInvalid = (formErrors: FieldErrors<BuilderValues>) => {
     const firstBad = formErrors.items
@@ -143,6 +178,8 @@ function BuilderForm({ initial }: { initial: BuilderValues }) {
   const current = Math.min(selected, fields.length - 1)
   const item = items[current]
   const itemErrors = errors.items?.[current]
+  const suggestion = item ? scan?.suggestions[item.id] : undefined
+  const questionSuggested = Boolean(item) && isSuggested(item.question, suggestion?.question)
 
   return (
     <form
@@ -197,6 +234,7 @@ function BuilderForm({ initial }: { initial: BuilderValues }) {
           {errors.title.message}
         </p>
       )}
+      {scan && <ScanBanner scan={scan} />}
 
       <div className="flex min-h-0 grow flex-col lg:flex-row">
         <nav
@@ -266,10 +304,14 @@ function BuilderForm({ initial }: { initial: BuilderValues }) {
               </div>
 
               <label className="flex flex-col gap-1.5 text-[13px] font-medium">
-                Question for Jev
+                <span className="flex items-center gap-2">
+                  Question for Jev
+                  {questionSuggested && <SuggestedPill />}
+                </span>
                 <textarea
                   key={`question-${fields[current].id}`}
                   rows={2}
+                  aria-describedby={questionSuggested ? SUGGESTED_HINT : undefined}
                   {...register(`items.${current}.question`)}
                   className={cn(fieldStyles, 'resize-y py-2.5 text-sm leading-normal font-normal')}
                 />
@@ -283,6 +325,8 @@ function BuilderForm({ initial }: { initial: BuilderValues }) {
                   levels={levels}
                   register={register}
                   errors={itemErrors}
+                  tips={item.tips}
+                  suggestedTips={suggestion?.tips}
                 />
               ) : (
                 <p className="m-0 rounded-[14px] border border-border bg-surface px-[18px] py-4 text-sm leading-normal text-ink-soft">
@@ -395,11 +439,15 @@ function LevelsTable({
   levels,
   register,
   errors,
+  tips,
+  suggestedTips,
 }: {
   index: number
   levels: string[]
   register: UseFormRegister<BuilderValues>
   errors?: FieldErrors<BuilderItem>
+  tips: string[]
+  suggestedTips?: string[]
 }) {
   const cell = cn(
     fieldStyles,
@@ -430,8 +478,16 @@ function LevelsTable({
             <FieldError message={errors?.descriptors?.[l]?.message} />
           </div>
           <div>
+            {isSuggested(tips[l] ?? '', suggestedTips?.[l]) && (
+              <div className="px-2 pb-1">
+                <SuggestedPill />
+              </div>
+            )}
             <textarea
               aria-label={`${level}: tip shown to students`}
+              aria-describedby={
+                isSuggested(tips[l] ?? '', suggestedTips?.[l]) ? SUGGESTED_HINT : undefined
+              }
               {...register(`items.${index}.tips.${l}`)}
               className={cn(cell, 'text-ink-soft')}
             />
@@ -516,5 +572,41 @@ function FieldError({ message }: { message?: string }) {
     <p role="alert" className="m-0 mt-1 text-[13px] font-normal text-warn">
       {message}
     </p>
+  )
+}
+
+function ScanBanner({ scan }: { scan: ScanDetails }) {
+  return (
+    <div className="flex gap-3 border-b border-divider bg-accent-soft px-4 py-3.5 text-sm leading-normal text-ink sm:px-7">
+      <ScanLine size={18} aria-hidden="true" className="mt-0.5 shrink-0 text-accent" />
+      <div className="flex flex-col gap-1">
+        <p className="m-0 font-semibold">
+          {scan.demo ? 'Demo scan: a fixed example, not your photo.' : 'Scanned from your photos.'}{' '}
+          Not saved yet.
+        </p>
+        <p className="m-0 text-ink-soft">
+          Check each level description against your rubric. Questions and tips marked Suggested were
+          written by AI, not your teacher: keep, edit or replace them, then save.
+        </p>
+        {scan.notes && !scan.demo && (
+          <p className="m-0 text-ink-soft">Note from the scan: {scan.notes}</p>
+        )}
+        <p id={SUGGESTED_HINT} className="sr-only">
+          Suggested by AI. Check it before saving.
+        </p>
+      </div>
+    </div>
+  )
+}
+
+/** Marks text the scanner wrote. Hidden from screen readers, which hear SUGGESTED_HINT instead. */
+function SuggestedPill() {
+  return (
+    <span
+      aria-hidden="true"
+      className="inline-flex rounded-full border border-border bg-muted px-2 py-px text-[11px] font-medium text-ink-soft"
+    >
+      Suggested
+    </span>
   )
 }

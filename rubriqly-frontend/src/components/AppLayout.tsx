@@ -1,7 +1,7 @@
 import { Menu } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { Navigate, Outlet, useLocation } from 'react-router'
-import { readSidebarCollapsed, useAccount, writeSidebarCollapsed } from '../lib/hooks'
+import { readSidebarCollapsed, useAccount, useSlow, writeSidebarCollapsed } from '../lib/hooks'
 import { buttonStyles, cn } from '../lib/ui'
 import { Logo } from './Logo'
 import { Sidebar } from './Sidebar'
@@ -35,18 +35,14 @@ export function AppLayout() {
   return <AppShell />
 }
 
-/** The free server sleeps when unused and takes up to a minute to wake: say so after a moment. */
+/** The free server sleeps when unused and can take a minute or two to wake: say so after a moment. */
 function Waking() {
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    const timer = setTimeout(() => setSlow(true), 3000)
-    return () => clearTimeout(timer)
-  }, [])
+  const slow = useSlow(true, 3000)
   return (
     <div data-page-fallback="" className="flex min-h-screen items-center justify-center bg-bg p-6">
       {slow && (
         <p role="status" className="m-0 max-w-sm text-center text-sm text-ink-2">
-          Waking up Rubriqly’s server. This can take up to a minute the first time.
+          Waking up Rubriqly’s server. This can take a minute or two.
         </p>
       )}
     </div>

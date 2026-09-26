@@ -18,7 +18,7 @@ export interface LegalDoc {
   sections: LegalSection[]
 }
 
-const UPDATED = '23 September 2026'
+const UPDATED = '26 September 2026'
 
 export const privacyPolicy: LegalDoc = {
   title: 'Privacy policy',
@@ -30,7 +30,8 @@ export const privacyPolicy: LegalDoc = {
   summary: [
     'Your drafts are saved in your browser, on your device. We don’t store them on our servers.',
     'When you check a draft, its text is sent to our server and to Vercel AI Gateway for scoring, with a setting that stops providers from training AI models on it. We don’t keep the text.',
-    'We store your account (email, name, a scrambled version of your password), your sign-in sessions and a count of your checks.',
+    'If you scan a rubric, your photos are sent to our server and to Vercel AI Gateway, where Google’s Gemini model reads them, with the same no-training setting. We don’t keep the photos.',
+    'We store your account (email, name, a scrambled version of your password), your sign-in sessions and a count of your checks and rubric scans.',
     'No ads, no selling your information, no analytics or tracking tools.',
   ],
   sections: [
@@ -42,6 +43,7 @@ export const privacyPolicy: LegalDoc = {
             'Account details: your email address and display name, and your password stored only as a scrambled fingerprint (an Argon2 hash). We can’t see or recover your password.',
             'Sign-in sessions: when you sign in, your browser gets one cookie holding a random code. We store a scrambled version of that code, and when the session started, was last used and expires (30 days after you last use it).',
             'Check records: for each check, the time, whether it succeeded, failed or was over a daily limit, how much text was processed (in “tokens”) and what it cost us. Not the text itself, the prompt or the results.',
+            'Rubric scan records: for each scan, the time, the outcome (for example read, not a rubric, or over the weekly limit), how many photos it had, how much was processed and what it cost us. Not the photos or the rubric.',
             'Sign-up network: when you create an account, we keep a scrambled, keyed version of your internet (IP) address, so we can limit how many accounts are created from one network each day. We don’t store the address itself.',
           ],
         },
@@ -65,13 +67,21 @@ export const privacyPolicy: LegalDoc = {
       ],
     },
     {
+      heading: 'What happens when you scan a rubric',
+      blocks: [
+        'If you use “Scan a rubric”, the photos you choose (up to three, made smaller in your browser first if they’re large) are sent from your browser to our server. Our server sends them to Vercel AI Gateway, which passes them to Google’s Gemini model. Gemini reads the rubric and returns it as text, with suggested questions and tips that the app marks as “Suggested”. It only ever receives rubric photos, never your drafts.',
+        'As with drafts, we ask Vercel AI Gateway to use only providers that don’t train AI models on the data they receive, and we don’t store or log the photos or the rubric on our side. The rubric you save is kept in your browser like your other rubrics. Vercel and Google handle the request under their own terms and privacy policies, which govern whether and for how long they keep request data.',
+        'A photo can show more than the rubric. Please crop out names, scores and anything else you don’t want sent.',
+      ],
+    },
+    {
       heading: 'Why we use this information',
       blocks: [
         {
           list: [
-            'To run Rubriqly: signing you in, scoring drafts and showing your account.',
+            'To run Rubriqly: signing you in, scoring drafts, reading rubric photos and showing your account.',
             'To keep accounts secure, for example by limiting wrong password attempts.',
-            'To prevent abuse and control costs, for example with daily limits on sign-ups and checks.',
+            'To prevent abuse and control costs, for example with limits on sign-ups, checks and rubric scans.',
             'To understand what running the service costs.',
           ],
         },
@@ -86,8 +96,9 @@ export const privacyPolicy: LegalDoc = {
           list: [
             'Render: hosts the website and our server (United States).',
             'Neon: hosts our database (United States, on Amazon Web Services).',
-            'Vercel (AI Gateway): passes draft text to the scoring model.',
+            'Vercel (AI Gateway): passes draft text to the scoring model, and rubric photos to the model that reads them.',
             'TypeSafe AI: runs the Jev scoring model.',
+            'Google: runs the Gemini model that reads rubric photos, when you scan a rubric.',
           ],
         },
         'The website’s fonts and code are served from Rubriqly’s own site; your browser doesn’t contact other companies to load them. We may also share information if the law requires it, or to protect Rubriqly’s users or the service from harm.',
@@ -105,12 +116,13 @@ export const privacyPolicy: LegalDoc = {
       blocks: [
         {
           list: [
-            'Account details, check records and the sign-up network record: until you delete your account.',
+            'Account details, check and rubric scan records, and the sign-up network record: until you delete your account.',
             'Sign-in sessions: until you sign out, or 30 days after you last used them.',
             'Draft text sent for scoring: we don’t keep it after the check finishes.',
+            'Rubric photos sent for scanning: we don’t keep them after the scan finishes.',
           ],
         },
-        'When you delete your account, it’s removed from our database straight away, together with your sessions and check records. It may remain for a short time in our database provider’s automatic backup history before being overwritten.',
+        'When you delete your account, it’s removed from our database straight away, together with your sessions, check records and rubric scan records. It may remain for a short time in our database provider’s automatic backup history before being overwritten.',
       ],
     },
     {
@@ -120,7 +132,7 @@ export const privacyPolicy: LegalDoc = {
           list: [
             'Change your display name or password in Settings.',
             'Download or delete the drafts, results and rubrics saved on a device in Settings.',
-            'Delete your account in Settings. This removes your account, sessions and check records from our servers, and your saved work from the device you’re using. Work saved on other devices stays there until you delete it on each one.',
+            'Delete your account in Settings. This removes your account, sessions, check records and rubric scan records from our servers, and your saved work from the device you’re using. Work saved on other devices stays there until you delete it on each one.',
             'Ask us what information we hold about you, or ask us to correct or delete it, by emailing {contact}.',
           ],
         },
@@ -176,6 +188,7 @@ export const termsOfUse: LegalDoc = {
       blocks: [
         'Rubriqly estimates how a draft might meet each criterion of a rubric, tags paragraphs and checks a list of requirements, to help you decide what to revise. Results are estimated levels produced by an AI model: an estimate, not a grade.',
         'Results can be wrong. Your teacher or institution decides the grade, and using Rubriqly doesn’t promise any particular result. Rubriqly never writes or rewrites your text; you are responsible for your work.',
+        '“Scan a rubric” copies a rubric from photos using an AI model. The copy can contain mistakes, and the questions and tips marked “Suggested” are written by the AI, not your teacher. Check a scanned rubric against the original before relying on it.',
       ],
     },
     {
@@ -199,7 +212,7 @@ export const termsOfUse: LegalDoc = {
     {
       heading: 'Your content',
       blocks: [
-        'Your drafts, prompts and rubrics stay yours. You allow us to process the text you submit only to provide the service, which includes sending it to our scoring providers as described in the Privacy Policy. Only submit content you have the right to use.',
+        'Your drafts, prompts, rubrics and rubric photos stay yours. You allow us to process what you submit only to provide the service, which includes sending it to our scoring and rubric-reading providers as described in the Privacy Policy. Only submit content you have the right to use, such as a rubric your teacher gave you.',
       ],
     },
     {
@@ -215,7 +228,7 @@ export const termsOfUse: LegalDoc = {
         'Don’t:',
         {
           list: [
-            'create accounts automatically or in bulk, or try to get around daily limits;',
+            'create accounts automatically or in bulk, or try to get around usage limits;',
             'try to access other people’s accounts or data, or interfere with or overload the service;',
             'use Rubriqly for anything illegal, or to submit content that is harmful or infringes other people’s rights.',
           ],
@@ -225,7 +238,7 @@ export const termsOfUse: LegalDoc = {
     {
       heading: 'Limits and availability',
       blocks: [
-        'Rubriqly is currently free, with daily limits on checks and sign-ups that we may change. If we ever introduce paid plans, we’ll tell you before charging you anything. The service may sometimes be slow or unavailable (for example, while its server wakes up), and we may change or stop features.',
+        'Rubriqly is currently free, with limits on checks, rubric scans and sign-ups that we may change. If we ever introduce paid plans, we’ll tell you before charging you anything. The service may sometimes be slow or unavailable (for example, while its server wakes up), and we may change or stop features.',
       ],
     },
     {

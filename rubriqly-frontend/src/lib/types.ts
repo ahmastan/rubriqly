@@ -162,3 +162,38 @@ export interface NewCheckInput {
   prompt: string
   text: string
 }
+
+/** A rubric read from photos by `POST /api/rubric-scans`. Levels and lists are lowest first. */
+export interface ScannedRubric {
+  title: string
+  levels: string[]
+  criteria: {
+    name: string
+    /** Copied from the rubric; empty when the cell was empty. */
+    descriptors: string[]
+    /** Written by the scanner, not on the rubric: shown as "Suggested" until edited. */
+    suggested_question: string
+    suggested_tips: string[]
+  }[]
+  checklist: { name: string; suggested_question: string }[]
+  word_count: { min: number | null; max: number | null } | null
+  /** What the scanner couldn't read or wasn't sure about. */
+  notes: string
+}
+
+/** Scans left: `used` of `limit` in the last 7 days. */
+export interface ScanQuota {
+  /** False when the server can't read photos right now (scanning isn't switched on). */
+  available: boolean
+  used: number
+  limit: number
+  /** When the oldest counted scan leaves the 7 days (ISO), if any count. */
+  next_free_at: string | null
+}
+
+export interface ScanResponse {
+  rubric: ScannedRubric
+  /** `mock` = the free demo scanner (a fixed example, not the student's photo). */
+  model: string
+  quota: ScanQuota
+}

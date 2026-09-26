@@ -19,7 +19,7 @@ from rubriqly.auth.limits import start_of_utc_day
 from rubriqly.auth.passwords import generate_password, hash_password
 from rubriqly.config import Settings
 from rubriqly.db import make_engine, utcnow
-from rubriqly.models import AuthSession, CheckUsage, User
+from rubriqly.models import AuthSession, CheckUsage, RubricScanUsage, User
 
 
 def describe_database(url: str) -> str:
@@ -102,10 +102,8 @@ def usage(db: Session, _args: argparse.Namespace) -> int:
     def count(model: type, *where: object) -> int:
         return db.scalar(select(func.count()).select_from(model).where(*where)) or 0
 
-    def cost_since(since: object) -> Decimal:
-        total = db.scalar(
-            select(func.sum(CheckUsage.cost_usd)).where(CheckUsage.created_at >= since)
-        )
+    def cost_since(since: object, model: type = CheckUsage) -> Decimal:
+        total = db.scalar(select(func.sum(model.cost_usd)).where(model.created_at >= since))
         return Decimal(total or 0)
 
     tokens = db.scalar(
@@ -122,10 +120,27 @@ def usage(db: Session, _args: argparse.Namespace) -> int:
         print(f"  {label:<15}{checks}")
     print(f"  input tokens:  {tokens or 0}")
     print(f"  Jev cost:      ${cost_since(today):.6f}")
+    for status, label in (
+        ("ok", "scans ok:"),
+        ("not_a_rubric", "not a rubric:"),
+        ("unreadable", "unreadable:"),
+        ("too_big", "too big:"),
+        ("failed", "scans failed:"),
+        ("rate_limited", "scans over:"),
+    ):
+        scans = count(
+            RubricScanUsage,
+            RubricScanUsage.created_at >= today,
+            RubricScanUsage.status == status,
+        )
+        if scans or status == "ok":
+            print(f"  {label:<15}{scans}")
+    print(f"  scan cost:     ${cost_since(today, RubricScanUsage):.6f}")
     print("All time")
     print(f"  users:         {count(User)}")
     print(f"  live sessions: {count(AuthSession, AuthSession.expires_at > now)}")
-    print(f"  Jev cost, last 30 days: ${cost_since(month):.6f}")
+    print(f"  Jev cost, last 30 days:  ${cost_since(month):.6f}")
+    print(f"  scan cost, last 30 days: ${cost_since(month, RubricScanUsage):.6f}")
     return 0
 
 
@@ -148,7 +163,9 @@ def build_parser() -> argparse.ArgumentParser:
         sub.set_defaults(run=run)
 
     commands.add_parser("list-users", help="list all accounts").set_defaults(run=list_users)
-    commands.add_parser("usage", help="today's sign-ups, checks and cost").set_defaults(run=usage)
+    commands.add_parser("usage", help="today's sign-ups, checks, scans and cost").set_defaults(
+        run=usage
+    )
     return parser
 
 

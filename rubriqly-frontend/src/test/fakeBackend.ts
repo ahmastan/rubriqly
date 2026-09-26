@@ -1,5 +1,5 @@
 import { mockCheckResponse } from '../lib/mockJev'
-import type { Rubric } from '../lib/types'
+import type { Rubric, ScannedRubric } from '../lib/types'
 
 // A stand-in for the Rubriqly backend, installed as `fetch` for every test (see setup.ts).
 // It follows the real API's shapes and error format (`{detail: {code, message}}`), keeps
@@ -35,6 +35,12 @@ let accounts: FakeAccount[] = []
 let signedIn: FakeAccount | null = null
 let nextCheckReply: Reply | null = null
 let offline = false
+let scansUsed = 0
+let scanningAvailable = true
+let nextScanReply: Reply | null = null
+const SCAN_LIMIT = 5
+const NEXT_FREE_AT = '2026-09-30T15:05:00Z'
+let held: Promise<void> | null = null
 export const requests: RecordedRequest[] = []
 
 /** Back to one account (test1@rubriqly.com), signed in. */
@@ -43,6 +49,10 @@ export function resetFakeBackend({ signedIn: startSignedIn = true } = {}) {
   signedIn = startSignedIn ? accounts[0] : null
   nextCheckReply = null
   offline = false
+  scansUsed = 0
+  scanningAvailable = true
+  nextScanReply = null
+  held = null
   requests.length = 0
 }
 
@@ -56,6 +66,27 @@ export const fakeBackend = {
   /** The next POST /api/checks fails like this, e.g. 503 scoring_unavailable. */
   failNextCheck: (status: number, code: string, message: string) => {
     nextCheckReply = { status, body: { detail: { code, message } } }
+  },
+  /** Replies wait (like a sleeping server) until the returned function is called. */
+  holdReplies: () => {
+    let release = () => {}
+    held = new Promise<void>((resolve) => (release = resolve))
+    return () => {
+      held = null
+      release()
+    }
+  },
+  /** The next POST /api/rubric-scans fails like this, e.g. 422 scan_unreadable. */
+  failNextScan: (status: number, code: string, message: string) => {
+    nextScanReply = { status, body: { detail: { code, message } } }
+  },
+  /** Like a production server where scanning isn't switched on. */
+  disableScanning: () => {
+    scanningAvailable = false
+  },
+  /** How many of this week's scans are used (the limit is 5). */
+  setScansUsed: (used: number) => {
+    scansUsed = used
   },
   goOffline: () => {
     offline = true
@@ -141,11 +172,70 @@ function handle(method: string, path: string, body: Record<string, unknown>): Re
     const response = mockCheckResponse(body.rubric as Rubric, String(body.text))
     return { status: 200, body: { ...response, model: 'typesafe-ai/jev' } }
   }
+  if (method === 'GET' && path === '/api/rubric-scans/quota') {
+    return { status: 200, body: scanQuota() }
+  }
+  if (method === 'POST' && path === '/api/rubric-scans') {
+    if (nextScanReply) {
+      const reply = nextScanReply
+      nextScanReply = null
+      return reply
+    }
+    if (scansUsed >= SCAN_LIMIT) {
+      return error(
+        429,
+        'weekly_scan_limit',
+        `You've used your ${SCAN_LIMIT} rubric scans for this week.`,
+      )
+    }
+    scansUsed += 1
+    return {
+      status: 200,
+      body: { rubric: SCANNED_RUBRIC, model: 'google/gemini-2.5-flash', quota: scanQuota() },
+    }
+  }
   return error(404, 'not_found', `No fake route for ${method} ${path}`)
+}
+
+function scanQuota() {
+  return {
+    available: scanningAvailable,
+    used: scansUsed,
+    limit: SCAN_LIMIT,
+    next_free_at: scansUsed ? NEXT_FREE_AT : null,
+  }
+}
+
+/** What the fake scanner "reads": an original example rubric, highest-first levels already flipped. */
+export const SCANNED_RUBRIC: ScannedRubric = {
+  title: 'Example lab report rubric',
+  levels: ['Beginning', 'Developing', 'Proficient'],
+  criteria: [
+    {
+      name: 'Hypothesis',
+      descriptors: ['No hypothesis', 'A vague hypothesis', 'A clear, testable hypothesis'],
+      suggested_question: 'How clear and testable is the hypothesis?',
+      suggested_tips: [
+        'Write one sentence predicting what will happen.',
+        'Make your prediction specific enough to test.',
+        'Keep it up: link your conclusion back to it.',
+      ],
+    },
+    {
+      name: 'Data',
+      descriptors: ['', 'Some data, loosely organized', 'Complete data in labelled tables'],
+      suggested_question: 'How complete and well organized is the data?',
+      suggested_tips: ['Record every measurement.', 'Put your data in a table.', 'Keep it up.'],
+    },
+  ],
+  checklist: [{ name: 'Includes a title', suggested_question: 'Does the report have a title?' }],
+  word_count: { min: 400, max: null },
+  notes: 'The bottom-left cell was blank on the photo.',
 }
 
 export async function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   if (offline) throw new TypeError('Failed to fetch')
+  if (held) await held
   const method = (init.method ?? 'GET').toUpperCase()
   const path = new URL(String(input), 'http://localhost').pathname
   const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}

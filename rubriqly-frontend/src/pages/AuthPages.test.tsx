@@ -1,5 +1,5 @@
-import { fireEvent, screen, waitFor } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { act, fireEvent, screen, waitFor } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 import { loadData } from '../lib/localStore'
 import { fakeBackend, requests, resetFakeBackend, TEST_PASSWORD } from '../test/fakeBackend'
 import { renderRoute } from '../test/renderRoute'
@@ -36,6 +36,29 @@ describe('Signing in', () => {
     fill('Email', 'test1@rubriqly.com')
     fill('Password', TEST_PASSWORD)
     await user.click(screen.getByRole('button', { name: 'Sign in' }))
+    await waitFor(() => expect(router.state.location.pathname).toBe('/check/new'))
+  })
+
+  it('says the server is waking up when signing in takes a while', async () => {
+    resetFakeBackend({ signedIn: false })
+    const { router } = await renderRoute('/signin')
+    fill('Email', 'test1@rubriqly.com')
+    fill('Password', TEST_PASSWORD)
+    const release = fakeBackend.holdReplies()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try {
+      fireEvent.click(screen.getByRole('button', { name: 'Sign in' }))
+      act(() => vi.advanceTimersByTime(100))
+      expect(screen.getByRole('button', { name: 'Signing in…' })).toBeDisabled()
+      expect(screen.queryByText(/Waking up/)).not.toBeInTheDocument()
+      act(() => vi.advanceTimersByTime(3000))
+      expect(screen.getByRole('status')).toHaveTextContent(
+        'Waking up Rubriqly’s server. This can take a minute or two.',
+      )
+    } finally {
+      vi.useRealTimers()
+    }
+    release()
     await waitFor(() => expect(router.state.location.pathname).toBe('/check/new'))
   })
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 from rubriqly.auth.passwords import verify_password
 from rubriqly.cli import main
 from rubriqly.config import Settings
-from rubriqly.models import AuthSession, CheckUsage, User
+from rubriqly.models import AuthSession, CheckUsage, RubricScanUsage, User
 
 
 @pytest.fixture
@@ -76,6 +76,8 @@ def test_list_users_and_usage(run, db: Session) -> None:
     run("create-user", "--email", "test2@rubriqly.com", "--name", "Test Student Two")
     user = db.scalars(select(User).where(User.email == "test1@rubriqly.com")).one()
     db.add(CheckUsage(user_id=user.id, status="ok", input_tokens=395, cost_usd="0.00001659"))
+    db.add(RubricScanUsage(user_id=user.id, status="ok", image_count=1, cost_usd="0.0043043"))
+    db.add(RubricScanUsage(user_id=user.id, status="not_a_rubric", cost_usd="0.002"))
     db.commit()
 
     code, out, _ = run("list-users")
@@ -87,3 +89,7 @@ def test_list_users_and_usage(run, db: Session) -> None:
     assert "checks ok:     1" in out
     assert "input tokens:  395" in out
     assert "$0.000017" in out
+    assert "scans ok:      1" in out
+    assert "not a rubric:  1" in out
+    assert "scans failed" not in out
+    assert "scan cost:     $0.006304" in out
