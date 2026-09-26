@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { ArrowUp, ChevronDown, Loader2, Lock, Paperclip, Plus, X } from 'lucide-react'
-import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
+import { useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { Link, useNavigate, useSearchParams } from 'react-router'
 import { z } from 'zod'
@@ -14,6 +14,7 @@ import {
 } from '../lib/api'
 import { ACCOUNT_KEY } from '../lib/auth'
 import { FileReadError, readDraftFile } from '../lib/fileText'
+import { useSlow } from '../lib/hooks'
 import { ApiError } from '../lib/http'
 import { countWords } from '../lib/text'
 import type { Rubric } from '../lib/types'
@@ -110,7 +111,7 @@ function Composer({
       }
     },
   })
-  const slow = useSlow(check.isPending)
+  const slow = useSlow(check.isPending, 8000)
 
   const onSubmit = (values: FormValues) =>
     check.mutate({
@@ -300,7 +301,7 @@ function Composer({
           {check.isPending && (
             <p role="status" className="m-0 px-1 text-[13px] text-ink-2">
               Checking your draft against {selectedRubric?.title ?? 'the rubric'}…
-              {slow && ' The server may be waking up; this can take up to a minute.'}
+              {slow && ' The server may be waking up; this can take a minute or two.'}
             </p>
           )}
           {(error || uploadMessage || check.isError) && (
@@ -319,20 +320,6 @@ function Composer({
       </div>
     </div>
   )
-}
-
-/** True once `active` has lasted a few seconds (e.g. a check that's taking a while). */
-function useSlow(active: boolean, afterMs = 8000) {
-  const [slow, setSlow] = useState(false)
-  useEffect(() => {
-    if (!active) return
-    const timer = setTimeout(() => setSlow(true), afterMs)
-    return () => {
-      clearTimeout(timer)
-      setSlow(false)
-    }
-  }, [active, afterMs])
-  return slow
 }
 
 const chip =

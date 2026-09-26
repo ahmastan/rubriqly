@@ -35,6 +35,7 @@ let accounts: FakeAccount[] = []
 let signedIn: FakeAccount | null = null
 let nextCheckReply: Reply | null = null
 let offline = false
+let held: Promise<void> | null = null
 export const requests: RecordedRequest[] = []
 
 /** Back to one account (test1@rubriqly.com), signed in. */
@@ -43,6 +44,7 @@ export function resetFakeBackend({ signedIn: startSignedIn = true } = {}) {
   signedIn = startSignedIn ? accounts[0] : null
   nextCheckReply = null
   offline = false
+  held = null
   requests.length = 0
 }
 
@@ -56,6 +58,15 @@ export const fakeBackend = {
   /** The next POST /api/checks fails like this, e.g. 503 scoring_unavailable. */
   failNextCheck: (status: number, code: string, message: string) => {
     nextCheckReply = { status, body: { detail: { code, message } } }
+  },
+  /** Replies wait (like a sleeping server) until the returned function is called. */
+  holdReplies: () => {
+    let release = () => {}
+    held = new Promise<void>((resolve) => (release = resolve))
+    return () => {
+      held = null
+      release()
+    }
   },
   goOffline: () => {
     offline = true
@@ -146,6 +157,7 @@ function handle(method: string, path: string, body: Record<string, unknown>): Re
 
 export async function fakeFetch(input: RequestInfo | URL, init: RequestInit = {}) {
   if (offline) throw new TypeError('Failed to fetch')
+  if (held) await held
   const method = (init.method ?? 'GET').toUpperCase()
   const path = new URL(String(input), 'http://localhost').pathname
   const body = init.body ? (JSON.parse(String(init.body)) as Record<string, unknown>) : {}
