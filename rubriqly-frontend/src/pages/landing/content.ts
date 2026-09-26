@@ -140,7 +140,7 @@ export const demoSteps = [
 export const statement = {
   text: 'Rubriqly scores your draft against the rubric. It never writes, rewrites, or finishes a sentence for you.',
   teachers:
-    'Under the hood, Rubriqly uses a scoring model that can only pick levels and answer yes or no. It has no way to produce text, so the revision is always the student’s own work.',
+    'Under the hood, Rubriqly scores drafts with a model that can only pick levels and answer yes or no. It has no way to produce text, so the revision is always the student’s own work.',
 }
 
 export const howItWorks = {
@@ -149,7 +149,7 @@ export const howItWorks = {
     {
       n: '1',
       title: 'Pick a rubric',
-      body: 'Start with a built-in rubric or build one that matches your assignment.',
+      body: 'Start with a built-in rubric, scan a photo of your teacher’s rubric, or build your own.',
     },
     {
       n: '2',
@@ -173,7 +173,7 @@ const RUBRIC_PURPOSE: Record<string, string> = {
 
 export const rubricLibrary = {
   heading: 'Start from a rubric, or bring your own.',
-  body: 'Built-in rubrics cover common assignments. The builder lets you write your own criteria, levels and tips.',
+  body: 'Built-in rubrics cover common assignments. Scan a photo of your teacher’s rubric, or write your own criteria, levels and tips in the builder.',
   rubrics: STARTER_RUBRICS.map((r) => ({
     id: r.id,
     title: r.title,
@@ -204,7 +204,7 @@ export const teachers = {
     },
     {
       title: 'It can’t do the writing',
-      body: 'The model only returns levels and yes/no answers. Every sentence in the final draft is the student’s.',
+      body: 'The model that scores drafts only returns levels and yes/no answers. Every sentence in the final draft is the student’s.',
     },
   ],
 }
@@ -214,6 +214,7 @@ export const privacy = {
   points: [
     'Drafts and results are saved in your browser, on your device.',
     'When you check a draft, its text is sent to Vercel AI Gateway to be scored by the Jev model.',
+    'Rubric photos you scan are read by Google’s Gemini model through Vercel AI Gateway, and aren’t kept.',
     'Rubriqly never writes or rewrites your text.',
     'Export or delete everything from Settings at any time.',
   ],
@@ -229,11 +230,15 @@ export const faq = {
     },
     {
       q: 'Can it write my essay?',
-      a: 'No. The scoring model only picks levels and answers yes/no questions. It can’t write, rewrite or finish text, so every change is yours.',
+      a: 'No. The model that scores your draft only picks levels and answers yes/no questions. It can’t write, rewrite or finish text, so every change is yours.',
     },
     {
       q: 'Which rubrics work?',
-      a: 'Built-in rubrics cover argumentative essays, lab reports and research papers. You can also build your own with levels, descriptions, tips and yes/no checklist items.',
+      a: 'Built-in rubrics cover argumentative essays, lab reports and research papers. You can also scan a photo of your teacher’s rubric, or build your own with levels, descriptions, tips and yes/no checklist items.',
+    },
+    {
+      q: 'Does the AI that reads rubric photos see my essay?',
+      a: 'No. Scanning a rubric uses a separate model, Google’s Gemini, that only receives your rubric photos. It copies the rubric and suggests questions and tips, clearly marked, for you to check before saving. Your drafts only ever go to the scoring model.',
     },
     {
       q: 'Is it free?',

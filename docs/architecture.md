@@ -29,6 +29,7 @@ What the server stores (`rubriqly-backend/src/rubriqly/models.py`):
 | `users` | email (lowercase, unique), display name, Argon2 password hash, `is_active`, `email_verified` (unused for now), a keyed hash of the sign-up network address | the password itself, the raw IP address |
 | `sessions` | SHA-256 of the session token, created / last seen / expires | the token itself |
 | `check_usage` | one row per check: time, status (`ok`, `failed`, `rate_limited`), input tokens, list-price cost | draft text, prompts, results |
+| `rubric_scan_usage` | one row per rubric scan: time, status (`ok`, `not_a_rubric`, `unreadable`, `too_big`, `failed`, `rate_limited`), photo count, input/output tokens, list-price cost | photos, rubric text |
 
 Deleting a user deletes their sessions and usage rows (`ON DELETE CASCADE`). Drafts, results and rubrics live only in the browser (`rubriqly-frontend/src/lib/localStore.ts`, one key per account).
 
@@ -51,6 +52,10 @@ These protect the scoring budget. They're all settings (`rubriqly-backend/src/ru
 | `CHECKS_PER_USER_PER_DAY` (successful checks only) | 30 |
 | `CHECKS_PER_DAY` (whole site; successful and failed) | 500 |
 | `MAX_WORDS` / `MAX_PARAGRAPHS` | 10,000 / 60 |
+| `RUBRIC_SCANS_PER_USER_PER_WEEK` (any 7 days; `ok` and `not_a_rubric` count) | 5 |
+| `RUBRIC_SCANS_PER_DAY` (whole site; everything that reached the model) | 200 |
+
+The weekly scan limit is read in one place, `scan_limit_for` in `api/rubric_scans.py`, so a paid plan can raise it later.
 
 ## Scoring
 
@@ -77,3 +82,27 @@ Checked against a real response (23 September 2026):
 - The cost is in `providerMetadata.gateway` (`cost` is what was charged; `marketCost` is the list price, which is what gets recorded).
 
 The client (`rubriqly-backend/src/rubriqly/jev/`) retries 429, 5xx and timeouts, and validates every answer. `JEV_MODE=mock` swaps in a free, repeatable fake for development and tests.
+
+## Scanning rubric photos
+
+"Scan a rubric" turns 1–3 photos of a rubric into a rubric the student checks in the builder. It uses a **separate vision model** (`SCAN_MODEL`, a Gemini Flash model) through the same gateway and key. That model only ever receives rubric photos, never drafts, so the scoring model stays the only one that sees student writing.
+
+```
+ Browser                                   API                                Vercel AI Gateway
+ photos shrunk if large (lib/rubricScan)
+ POST /api/rubric-scans {images}     ──▶  signed in? real JPG/PNG/WebP?
+                                           under the weekly + daily limits?
+                                           one chat completion (JSON schema) ──▶  google/gemini-…
+                                    ◀──    rubric + quota                     ◀──
+ builder opens pre-filled; AI-written
+ questions and tips marked "Suggested"
+ until edited; saved locally like any rubric
+```
+
+- The model is told to copy every cell word for word, work out the table's orientation, ignore watermarks and names, and never invent text. Everything it writes itself goes in `suggested_*` fields.
+- Levels always come back lowest first. If the model keeps the page's highest-first order, the points give it away and the API flips them (`scan/client.py`).
+- The answer is checked strictly: not a rubric, unreadable (for example a missing description) and too big for Rubriqly (more than 8 levels, 12 criteria or 15 checklist items) each get their own error, and nothing is guessed. Empty cells stay empty, and the builder asks the student to fill them in.
+- Photos and rubric text are never stored or logged. The cost is read from the response's `usage.cost` / `usage.market_cost`, and the list price is recorded, as for checks.
+- `SCAN_MODE=mock` returns a fixed, labelled demo rubric for development and tests. Production refuses it, so students never get a fake scan.
+- `scripts/smoke_scan.py` scans your own photos for real (dry run without `--yes`).
+

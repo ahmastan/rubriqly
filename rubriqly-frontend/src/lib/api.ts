@@ -5,7 +5,15 @@ import { clearData, loadData, newId, updateData } from './localStore'
 import { STARTER_RUBRICS } from './starterRubrics'
 import { countWords, extractTitle, splitParagraphs } from './text'
 import { getThemePreference } from './theme'
-import type { Assignment, CheckResponse, CheckView, NewCheckInput, Rubric } from './types'
+import type {
+  Assignment,
+  CheckResponse,
+  CheckView,
+  NewCheckInput,
+  Rubric,
+  ScanQuota,
+  ScanResponse,
+} from './types'
 
 // The one place screens get data from. Drafts, checks and rubrics are stored on this device
 // (per account, see localStore). Only the text being checked goes to the backend, which returns
@@ -39,6 +47,24 @@ export async function saveRubric(rubric: Rubric): Promise<Rubric> {
     }
   })
   return saved
+}
+
+/** Shown where rubric photos are chosen. It must describe what really happens. */
+export const SCAN_PRIVACY_NOTICE =
+  'Your photos are sent to Rubriqly’s server and to Vercel AI Gateway, where Google’s Gemini model reads them. They aren’t used for training and aren’t kept by Rubriqly. Leave out names and scores.'
+
+export const SCAN_QUOTA_KEY = ['scan-quota'] as const
+
+export async function getScanQuota(): Promise<ScanQuota> {
+  return apiFetch<ScanQuota>('/api/rubric-scans/quota')
+}
+
+/** Reads rubric photos (base64, from `preparePhoto`). Nothing is saved until the builder saves. */
+export async function scanRubric(photos: string[]): Promise<ScanResponse> {
+  return apiFetch<ScanResponse>('/api/rubric-scans', {
+    method: 'POST',
+    body: { images: photos.map((data) => ({ data })) },
+  })
 }
 
 export interface AssignmentSummary extends Assignment {

@@ -41,7 +41,7 @@ npm run dev
 
 Sign in with the account you created. Results from the mock scorer are labelled as such.
 
-To score with the real Jev model, set `JEV_MODE=live` and `AI_GATEWAY_API_KEY` in `rubriqly-backend/.env`. Real checks cost a fraction of a cent each.
+To score with the real Jev model, set `JEV_MODE=live` and `AI_GATEWAY_API_KEY` in `rubriqly-backend/.env`. Real checks cost a fraction of a cent each. To read rubric photos for real ("Scan a rubric"), also set `SCAN_MODE=live`; each scan costs about half a cent, and the mock returns a fixed demo rubric.
 
 ## Checks
 

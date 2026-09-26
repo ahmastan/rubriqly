@@ -28,6 +28,13 @@ class Settings(BaseSettings):
     jev_base_url: str = "https://ai-gateway.vercel.sh/v1"
     jev_timeout_seconds: float = Field(default=30.0, gt=0)
 
+    # Reading rubric photos: a vision model through the same gateway (JEV_BASE_URL) and key.
+    # It only ever sees rubric photos, never drafts. `mock` is free; `live` costs money.
+    scan_mode: Literal["mock", "live"] = "mock"
+    # Newer Gemini models (e.g. google/gemini-3.8-flash) need paid gateway credits.
+    scan_model: str = "google/gemini-2.5-flash"
+    scan_timeout_seconds: float = Field(default=60.0, gt=0)
+
     # Accounts
     session_days: int = Field(default=30, gt=0)
     login_failures_before_lock: int = Field(default=5, gt=0)
@@ -47,6 +54,10 @@ class Settings(BaseSettings):
     signups_per_day: int = Field(default=100, gt=0)
     checks_per_user_per_day: int = Field(default=30, gt=0)
     checks_per_day: int = Field(default=500, gt=0)
+    # Rubric photo scans: per student over any 7 days (a paid plan will raise this), and site-wide
+    # per UTC day. See api/rubric_scans.py for what counts.
+    rubric_scans_per_user_per_week: int = Field(default=5, gt=0)
+    rubric_scans_per_day: int = Field(default=200, gt=0)
 
     @field_validator("allowed_origins", mode="before")
     @classmethod
@@ -73,6 +84,8 @@ class Settings(BaseSettings):
     def check_required_secrets(self) -> Self:
         if self.jev_mode == "live" and not self.ai_gateway_api_key.get_secret_value():
             raise ValueError("JEV_MODE=live needs AI_GATEWAY_API_KEY to be set")
+        if self.scan_mode == "live" and not self.ai_gateway_api_key.get_secret_value():
+            raise ValueError("SCAN_MODE=live needs AI_GATEWAY_API_KEY to be set")
         if self.environment == "production" and (
             self.secret_key.get_secret_value() == DEV_SECRET_KEY
         ):

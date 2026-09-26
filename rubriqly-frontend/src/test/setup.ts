@@ -46,6 +46,12 @@ if (typeof window.matchMedia !== 'function') {
     }) as MediaQueryList
 }
 
+// jsdom can't make object URLs (used for photo thumbnails). A placeholder address is enough.
+if (typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = () => 'blob:rubriqly-test'
+  URL.revokeObjectURL = () => {}
+}
+
 // Every test talks to the in-memory fake backend and starts signed in as test1@rubriqly.com, with
 // that account's drafts selected (so tests can call the data layer before rendering).
 beforeEach(() => {

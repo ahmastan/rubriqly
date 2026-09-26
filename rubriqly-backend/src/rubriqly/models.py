@@ -10,6 +10,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from rubriqly.db import Base, UTCDateTime, utcnow
 
 CHECK_STATUSES = ("ok", "failed", "rate_limited")
+# `ok` and `not_a_rubric` count towards a student's weekly scans; see api/rubric_scans.py.
+SCAN_STATUSES = ("ok", "not_a_rubric", "unreadable", "too_big", "failed", "rate_limited")
 
 
 def new_id(prefix: str) -> str:
@@ -36,6 +38,9 @@ class User(Base):
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
     check_usage: Mapped[list["CheckUsage"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan", passive_deletes=True
+    )
+    rubric_scan_usage: Mapped[list["RubricScanUsage"]] = relationship(
         back_populates="user", cascade="all, delete-orphan", passive_deletes=True
     )
 
@@ -77,3 +82,30 @@ class CheckUsage(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="check_usage")
+
+
+class RubricScanUsage(Base):
+    """One row per rubric-photo scan, for the weekly limit and cost tracking. No photos, no text."""
+
+    __tablename__ = "rubric_scan_usage"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ({})".format(", ".join(f"'{s}'" for s in SCAN_STATUSES)),
+            name="status_valid",
+        ),
+        Index("ix_rubric_scan_usage_user_id_created_at", "user_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True, default=lambda: new_id("scn"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    status: Mapped[str] = mapped_column(String(20))
+    image_count: Mapped[int] = mapped_column(default=0, server_default="0")
+    input_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
+    output_tokens: Mapped[int] = mapped_column(default=0, server_default="0")
+    # List price, like check_usage.cost_usd, so usage shows real consumption on free credit too.
+    cost_usd: Mapped[Decimal] = mapped_column(
+        Numeric(12, 8), default=Decimal(0), server_default="0"
+    )
+
+    user: Mapped[User] = relationship(back_populates="rubric_scan_usage")

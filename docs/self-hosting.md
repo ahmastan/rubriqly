@@ -44,7 +44,9 @@ Or score a sample essay end to end: `cd rubriqly-backend && uv run python script
 4. Watch the API's logs. You should see the Alembic migration run, then `Uvicorn running`.
 5. Open `https://<your-site>/api/health`. You should see `{"status":"ok"}`. If you see the web page instead, the `/api/*` rewrite is missing or points at the wrong address.
 
-The API refuses to start in production without a Postgres `DATABASE_URL`, a real `SECRET_KEY`, or (with `JEV_MODE=live`) an `AI_GATEWAY_API_KEY`. The log says which one is missing.
+The API refuses to start in production without a Postgres `DATABASE_URL`, a real `SECRET_KEY`, or (with `JEV_MODE=live` or `SCAN_MODE=live`) an `AI_GATEWAY_API_KEY`. The log says which one is missing.
+
+"Scan a rubric" needs `SCAN_MODE=live` (the example Blueprint sets it). Without it, the production site says rubric scanning isn't available rather than showing a demo rubric. Scans use `SCAN_MODEL` (default `google/gemini-2.5-flash`, which works on Vercel's free tier; newer Gemini models need paid credits). To check accuracy on your own photos first: `cd rubriqly-backend && uv run python scripts/smoke_scan.py photo.jpg` (a free dry run; add `--yes` for a real scan).
 
 ## 4. Your first account
 

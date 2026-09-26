@@ -29,11 +29,17 @@ describe('Privacy policy', () => {
       'The file itself isn’t sent anywhere',
       'This policy covers the Rubriqly service at rubriqly.com',
       'GitHub’s own privacy policy applies',
+      'What happens when you scan a rubric',
+      'Google’s Gemini model',
+      'never your drafts',
+      'we don’t store or log the photos',
+      'Rubric photos sent for scanning: we don’t keep them',
+      'Rubric scan records',
     ]) {
       expect(text).toContain(fact)
     }
-    // Fonts are self-hosted now, so Google isn't one of the companies that sees visitors.
-    expect(text).not.toContain('Google')
+    // Fonts are self-hosted, so Google only appears for reading rubric photos.
+    expect(text).not.toContain('Google Fonts')
   })
 
   it('lists every section as a heading', async () => {
@@ -52,6 +58,7 @@ describe('Terms of use', () => {
     expect(text).toContain('never writes or rewrites your text')
     expect(text).toContain('laws of the United States')
     expect(text).toContain('MIT License')
+    expect(text).toContain('written by the AI, not your teacher')
     expect(text).toContain('aren’t covered by these terms')
     expect(text).toContain('doesn’t cover the Rubriqly name or logo')
     expect(termsOfUse.sections.length).toBeGreaterThan(5)
