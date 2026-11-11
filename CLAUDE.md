@@ -129,7 +129,7 @@ CI (`.github/workflows/ci.yml`) runs:
   - Routes that need a user take `current: CurrentUser` (`auth/deps.py`).
   - Errors are `{"detail": {"code", "message"}}` via `api_error`.
   - Sign-up requires `confirms_age` (self-declared, `MIN_AGE` 13) and `accepts_terms`. It's limited per network (HMAC of the address; set `CLIENT_IP_HEADER` behind a proxy, e.g. `x-forwarded-for` on Render) and site-wide per UTC day.
-  - Wrong-password lockout is in memory (`LoginThrottle`), which is fine for one server.
+  - Wrong-password lockout is in memory (`LoginThrottle`), which is fine for one server. Changing the password and deleting the account re-check the password through the same lockout (`confirm_password`).
   - Admin CLI: `uv run rubriqly create-user|reset-password|deactivate-user|activate-user|list-users|usage`. Generated passwords are printed once and never written anywhere.
 - **Jev client (`rubriqly/jev/`):**
   - `JevClient` protocol with an async `evaluate(state, questions) -> EvaluateResult`, on `app.state.jev`.
@@ -137,7 +137,7 @@ CI (`.github/workflows/ci.yml`) runs:
   - `GatewayJevClient` POSTs to `{JEV_BASE_URL}/evaluate`, always with `disallowPromptTraining: true`. It retries timeouts, network errors, 429 and 5xx up to 3 attempts, honoring `Retry-After` (capped at 5s).
   - Responses are validated. A missing, mistyped or off-scale answer raises `JevError("unavailable")`; the client never guesses.
   - `JevError.kind` is one of unavailable, rate_limited, budget, not_configured or bad_request. `.message` is safe to show students; details stay in the logs.
-  - Logs hold tokens, cost and the generation id only, never the state or the key.
+  - Logs hold tokens, cost and the generation id only, never the state or the key. Failures are logged by kind and HTTP status (`post_with_retries`); the gateway's reply text only for 401/402/403/429, since other replies can quote the request. Unusable replies are logged by place (`problem_places`), never content.
   - `EvaluateResult` has `cost_usd` (what was charged; 0 on the free credit) and `market_cost_usd` (the list price).
 - **Gateway calls (`rubriqly/gateway.py`):** `post_with_retries` and `failure_for` are shared by the Jev client and the scanner; each converts `GatewayFailure` to its own error.
 - **Rubric scanner (`rubriqly/scan/`, `api/rubric_scans.py`):**
@@ -155,6 +155,7 @@ CI (`.github/workflows/ci.yml`) runs:
   - Any Jev failure returns a 503 `scoring_<kind>`, never a partial result.
   - Each attempt writes one `check_usage` row: `ok`, `failed` (with the partial spend) or `rate_limited`. `cost_usd` is the **list price** (`market_cost_usd`), so usage shows real consumption even on free credit.
   - The per-student daily limit counts only `ok` checks. The site-wide limit counts `ok` and `failed`.
+  - Checks and scans still running count towards the limits too (`InFlight` in `auth/limits.py`, in memory like `LoginThrottle`), so requests sent at the same moment can't all get in. A request holds its place until its usage row is committed.
   - The draft text is never stored or logged.
   - The endpoint is sync (the DB runs in the threadpool) and calls the async scorer via `anyio.from_thread.run`.
 - **Database:** Postgres in production (the reference deployment uses Neon); any Postgres, e.g. a Neon `dev` branch, in development via `DATABASE_URL` in `.env`. Production refuses a non-Postgres `DATABASE_URL`. Models are in `models.py` (`users`, `sessions` as `AuthSession`, `check_usage`, `rubric_scan_usage`) and never hold draft text or rubric photos. `UTCDateTime` keeps timestamps timezone-aware on SQLite too. The engine is lazy and `/api/health` never queries the database (so Render's health checks don't keep Neon awake). Routes get a session through `Depends(get_db)`.

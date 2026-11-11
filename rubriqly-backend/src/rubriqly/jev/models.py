@@ -98,7 +98,8 @@ def parse_response(body: object) -> EvaluateResult:
     for key, answer in raw.answers.items():
         if isinstance(answer, ScoreAnswer) and answer.confidence is None:
             confidence = fallback_confidence.get(key)
-            if confidence is not None:
+            # Only a real probability; anything else is left out (the scorer then works it out).
+            if isinstance(confidence, int | float) and 0 <= confidence <= 1:
                 answer = answer.model_copy(update={"confidence": float(confidence)})
         answers[key] = answer
 

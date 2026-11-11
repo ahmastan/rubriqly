@@ -1,6 +1,8 @@
 import asyncio
 import copy
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 from typing import Any
 
@@ -272,3 +274,80 @@ def test_failure_gives_an_error_never_a_partial_result(student: TestClient, db: 
     assert row.status == "failed"
     assert row.input_tokens == 100  # the rubric request succeeded and still cost something
     assert row.cost_usd == Decimal("0.0000042")
+
+
+# Checks sent at the same moment
+
+
+class SlowJev(ScriptedJev):
+    """Takes a moment, like the real Jev, so requests overlap."""
+
+    async def evaluate(self, state: State, questions: dict) -> EvaluateResult:
+        await asyncio.sleep(0.2)
+        return await super().evaluate(state, questions)
+
+
+def all_at_once(clients: list[TestClient]) -> list[int]:
+    with ThreadPoolExecutor(len(clients)) as pool:
+        return sorted(pool.map(lambda c: check(c).status_code, clients))
+
+
+def test_checks_sent_at_once_cant_get_past_a_students_limit(client_with, db: Session) -> None:
+    client = client_with(checks_per_user_per_day=2)
+    client.app.state.jev = SlowJev()
+    assert all_at_once([client] * 6) == [200, 200, 429, 429, 429, 429]
+    assert sorted(row.status for row in usage_rows(db)) == ["ok"] * 2 + ["rate_limited"] * 4
+
+
+def test_checks_sent_at_once_cant_get_past_the_site_limit(client_with) -> None:
+    client = client_with(checks_per_day=2)
+    client.app.state.jev = SlowJev()
+    students = [client] + [
+        sign_up(TestClient(client.app), email=f"test{n}@rubriqly.com") for n in (2, 3, 4)
+    ]
+    assert all_at_once(students) == [200, 200, 429, 429]
+
+
+def test_finished_and_failed_checks_free_their_place(client_with) -> None:
+    client = client_with(checks_per_user_per_day=2)
+    client.app.state.jev = ScriptedJev(fail_paragraphs=True)
+    assert check(client).status_code == 503
+    client.app.state.jev = ScriptedJev()
+    assert check(client).status_code == 200
+    assert check(client).status_code == 200
+    assert check(client).status_code == 429
+    in_flight = client.app.state.checks_in_flight
+    with in_flight.admit("anyone", lambda user, site: (user, site)) as running:
+        assert running == (0, 0)
+
+
+# Odd replies from Jev
+
+
+class ExtraAnswersJev(ScriptedJev):
+    """Answers every question in reverse order, plus one nobody asked for."""
+
+    async def evaluate(self, state: State, questions: dict) -> EvaluateResult:
+        result = await super().evaluate(state, questions)
+        answers = dict(reversed(result.answers.items()))
+        answers["surprise"] = ScoreAnswer(type="score", score=1, probabilities={"1": 1})
+        return result.model_copy(update={"answers": answers})
+
+
+def test_extra_or_reordered_answers_dont_change_the_tags(student: TestClient) -> None:
+    student.app.state.jev = ExtraAnswersJev()
+    response = check(student)
+    assert response.status_code == 200
+    paragraphs = response.json()["paragraphs"]
+    assert [t["label"] for t in paragraphs[0]["tags"]] == ["Claim", "Context"]
+    assert [t["label"] for t in paragraphs[1]["tags"]] == ["Claim", "Evidence", "Analysis"]
+
+
+def test_failures_are_logged_without_the_draft(
+    student: TestClient, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    student.app.state.jev = ScriptedJev(fail_paragraphs=True)
+    check(student)
+    assert "check failed: rate_limited" in caplog.text
+    assert "printing press" not in caplog.text.lower()

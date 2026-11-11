@@ -13,7 +13,7 @@ import httpx
 from pydantic import ValidationError
 
 from rubriqly.config import Settings
-from rubriqly.gateway import GatewayFailure, post_with_retries
+from rubriqly.gateway import GatewayFailure, post_with_retries, problem_places
 from rubriqly.jev.models import (
     BooleanAnswer,
     BooleanQuestion,
@@ -98,9 +98,18 @@ class GatewayJevClient:
 
         try:
             result = parse_response(response.json())
-        except (ValueError, ValidationError) as error:
+        except ValidationError as error:
+            # Where the reply was wrong, not what it said.
+            logger.warning("jev reply couldn't be used: problems at %s", problem_places(error))
             raise JevError("unavailable", f"unexpected response: {error}") from error
-        check_answers(questions, result)
+        except ValueError as error:
+            logger.warning("jev reply isn't JSON")
+            raise JevError("unavailable", f"unexpected response: {error}") from error
+        try:
+            check_answers(questions, result)
+        except JevError as error:
+            logger.warning("jev reply couldn't be used: %s", error)
+            raise
 
         # Never log the state: it's the student's text.
         logger.info(

@@ -17,6 +17,7 @@ from rubriqly.scan import (
     make_scan_client,
     sniff_media_type,
 )
+from rubriqly.scan.client import parse_scan_response
 
 API_KEY = "test-gateway-key-do-not-log"
 PNG = b"\x89PNG\r\n\x1a\n" + b"rubric-photo-bytes"
@@ -351,3 +352,13 @@ def test_image_types_come_from_the_bytes() -> None:
     assert sniff_media_type(b"RIFF\x00\x00\x00\x00WEBPVP8 ") == "image/webp"
     assert sniff_media_type(b"GIF89a") is None
     assert sniff_media_type(b"%PDF-1.7") is None
+
+
+def test_unusable_replies_are_logged_without_the_rubric(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    answer = rubric_answer()
+    answer["levels"] = "Secret Rubric Wording"  # not a list
+    with pytest.raises(ScanError):
+        parse_scan_response(completion(answer))
+    assert "scan reply couldn't be used: ValidationError at levels" in caplog.text
+    assert "Secret Rubric Wording" not in caplog.text
