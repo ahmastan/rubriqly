@@ -12,6 +12,7 @@ site-wide `RUBRIC_SCANS_PER_DAY` counts everything that reached the model.
 
 import base64
 import binascii
+import logging
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Annotated
@@ -23,11 +24,13 @@ from sqlalchemy import func, select
 
 from rubriqly.api.errors import api_error
 from rubriqly.auth.deps import AppSettings, CurrentUser, DbSession
-from rubriqly.auth.limits import start_of_utc_day
+from rubriqly.auth.limits import InFlight, start_of_utc_day
 from rubriqly.config import Settings
 from rubriqly.db import utcnow
 from rubriqly.models import RubricScanUsage, User
 from rubriqly.scan import ScanClient, ScanError, ScanImage, ScannedRubric, sniff_media_type
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["rubric scans"])
 
@@ -159,47 +162,64 @@ def create_scan(
     # Cheap checks first, before any limit is used or any money is spent.
     images = decode_images(body)
     user = current.user
+    limit = scan_limit_for(user, settings)
 
-    quota = quota_for(db, user, settings)
-    if quota.used >= quota.limit:
-        record(db, user.id, "rate_limited", len(images))
-        raise api_error(
-            429,
-            "weekly_scan_limit",
-            f"You've used your {quota.limit} rubric scans for this week.",
-        )
-    if scans_today(db) >= settings.rubric_scans_per_day:
-        record(db, user.id, "rate_limited", len(images))
-        raise api_error(
-            429,
-            "daily_scan_limit_site",
-            "Rubriqly has reached today's rubric scanning limit. Please try again tomorrow.",
-        )
+    def limit_reached(running_for_user: int, running_site_wide: int) -> str | None:
+        # Scans still running count too, so scans sent at the same moment can't all get in.
+        if quota_for(db, user, settings).used + running_for_user >= limit:
+            return "user"
+        if scans_today(db) + running_site_wide >= settings.rubric_scans_per_day:
+            return "site"
+        return None
 
-    scanner: ScanClient = request.app.state.scanner
-    try:
-        result = anyio.from_thread.run(scanner.scan, images)
-    except ScanError as error:
-        status = error.kind if error.kind in PHOTO_PROBLEMS else "failed"
+    in_flight: InFlight = request.app.state.scans_in_flight
+    # Stay inside until the usage row is written, so the scan is always counted somewhere.
+    with in_flight.admit(user.id, limit_reached) as refused:
+        if refused == "user":
+            record(db, user.id, "rate_limited", len(images))
+            raise api_error(
+                429,
+                "weekly_scan_limit",
+                f"You've used your {limit} rubric scans for this week.",
+            )
+        if refused == "site":
+            record(db, user.id, "rate_limited", len(images))
+            raise api_error(
+                429,
+                "daily_scan_limit_site",
+                "Rubriqly has reached today's rubric scanning limit. Please try again tomorrow.",
+            )
+
+        scanner: ScanClient = request.app.state.scanner
+        try:
+            result = anyio.from_thread.run(scanner.scan, images)
+        except ScanError as error:
+            photo_problem = error.kind in PHOTO_PROBLEMS
+            record(
+                db,
+                user.id,
+                error.kind if photo_problem else "failed",
+                len(images),
+                error.input_tokens,
+                error.output_tokens,
+                error.market_cost_usd,
+            )
+            if not photo_problem:
+                # The kind only: details stay with the gateway's own log line.
+                logger.warning("scan failed: %s", error.kind)
+            raise api_error(
+                422 if photo_problem else 503, f"scan_{error.kind}", error.message
+            ) from None
+
         record(
             db,
             user.id,
-            status,
+            "ok",
             len(images),
-            error.input_tokens,
-            error.output_tokens,
-            error.market_cost_usd,
+            result.input_tokens,
+            result.output_tokens,
+            result.market_cost_usd,
         )
-        code = 422 if error.kind in PHOTO_PROBLEMS else 503
-        raise api_error(code, f"scan_{error.kind}", error.message) from None
-
-    record(
-        db,
-        user.id,
-        "ok",
-        len(images),
-        result.input_tokens,
-        result.output_tokens,
-        result.market_cost_usd,
-    )
-    return ScanOut(rubric=result.rubric, model=result.model, quota=quota_for(db, user, settings))
+        return ScanOut(
+            rubric=result.rubric, model=result.model, quota=quota_for(db, user, settings)
+        )

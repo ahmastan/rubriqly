@@ -298,3 +298,35 @@ def test_account_endpoints_require_sign_in(client: TestClient) -> None:
     assert client.get("/api/auth/me").status_code == 401
     assert client.patch("/api/auth/me", json={"display_name": "x"}).status_code == 401
     assert client.request("DELETE", "/api/auth/me", json={"password": "x"}).status_code == 401
+
+
+def test_password_guesses_while_signed_in_are_limited_too(client: TestClient) -> None:
+    signup(client)
+    for _ in range(3):
+        wrong = client.post(
+            "/api/auth/password",
+            json={"current_password": "nope nope nope", "new_password": "a brand new passphrase"},
+        )
+        assert error_code(wrong) == "wrong_password"
+    for _ in range(2):
+        wrong = client.request("DELETE", "/api/auth/me", json={"password": "wrong password!"})
+        assert error_code(wrong) == "wrong_password"
+
+    # Locked now, even with the right password, here and at sign-in.
+    locked = client.request("DELETE", "/api/auth/me", json={"password": PASSWORD})
+    assert locked.status_code == 429
+    assert error_code(locked) == "too_many_attempts"
+    assert login(TestClient(client.app)).status_code == 429
+    assert client.get("/api/auth/me").status_code == 200  # still signed in, nothing deleted
+
+
+def test_right_password_while_signed_in_resets_the_count(client: TestClient) -> None:
+    signup(client)
+    body = {"current_password": "nope nope nope", "new_password": "a brand new passphrase"}
+    for _ in range(4):
+        client.post("/api/auth/password", json=body)
+    body["current_password"] = PASSWORD
+    assert client.post("/api/auth/password", json=body).status_code == 204
+    for _ in range(4):
+        login(TestClient(client.app), password="wrong password!")
+    assert login(TestClient(client.app), password="a brand new passphrase").status_code == 200

@@ -24,6 +24,7 @@ from rubriqly.scoring.compile import (
     checklist_key,
     criterion_key,
     draft_state,
+    paragraph_labels,
     paragraph_request,
     paragraph_role,
     rubric_questions,
@@ -121,12 +122,15 @@ def criterion_out(criterion_id: str, answer: ScoreAnswer, levels: int) -> Criter
 
 
 def paragraph_out(n: int, role: Role, result: EvaluateResult) -> ParagraphOut:
+    # In the order the questions were asked, ignoring any extra answers in the reply (every
+    # question's answer was already checked by the client).
     tags: list[TagOut] = []
-    for key, answer in result.answers.items():
+    for key, label in paragraph_labels(role).items():
+        answer = result.answers[key]
         assert isinstance(answer, BooleanAnswer)
         tags.append(
             TagOut(
-                label=key.capitalize(),
+                label=label,
                 present=answer.probability >= TAG_THRESHOLD,
                 probability=answer.probability,
             )

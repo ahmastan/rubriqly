@@ -6,6 +6,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Literal
 
 import httpx
+from pydantic import ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -14,13 +15,22 @@ FailureKind = Literal["unavailable", "rate_limited", "budget", "not_configured",
 RETRY_STATUSES = frozenset({408, 409, 425, 429, 500, 502, 503, 504})
 
 
-class GatewayFailure(Exception):
-    """A request that failed for good. `detail` is for the logs only, never for students."""
+# Error replies safe to log: they're about the account (key, budget, rate), so they can't repeat
+# the request. Other replies, a 400 for example, may quote what was sent: a draft or a rubric.
+_LOGGABLE_REPLIES = frozenset({401, 402, 403, 429})
 
-    def __init__(self, kind: FailureKind, detail: str) -> None:
+
+class GatewayFailure(Exception):
+    """A request that failed for good. `detail` is never shown to students.
+
+    `log_detail` is what may be logged: never the request, and only replies that can't quote it.
+    """
+
+    def __init__(self, kind: FailureKind, detail: str, log_detail: str | None = None) -> None:
         super().__init__(f"{kind}: {detail}")
         self.kind: FailureKind = kind
         self.detail = detail
+        self.log_detail = detail if log_detail is None else log_detail
 
 
 async def post_with_retries(
@@ -33,7 +43,27 @@ async def post_with_retries(
     attempts: int,
     name: str,
 ) -> httpx.Response:
-    """Retries timeouts, network errors, 429 and 5xx before giving up with a GatewayFailure."""
+    """Retries timeouts, network errors, 429 and 5xx before giving up with a GatewayFailure.
+
+    Giving up is logged (kind and status, never the payload), so outages can be diagnosed.
+    """
+    try:
+        return await _post(http, url, payload, headers, sleep, attempts=attempts, name=name)
+    except GatewayFailure as failure:
+        logger.warning("%s failed (%s): %s", name, failure.kind, failure.log_detail)
+        raise
+
+
+async def _post(
+    http: httpx.AsyncClient,
+    url: str,
+    payload: dict,
+    headers: dict[str, str],
+    sleep: Callable[[float], Awaitable[None]],
+    *,
+    attempts: int,
+    name: str,
+) -> httpx.Response:
     for attempt in range(1, attempts + 1):
         last_try = attempt == attempts
         failed: httpx.Response | None = None
@@ -70,16 +100,28 @@ def retry_delay(attempt: int, response: httpx.Response | None) -> float:
 def failure_for(response: httpx.Response) -> GatewayFailure:
     status = response.status_code
     detail = f"HTTP {status}: {response.text[:500]}"
+    if status in _LOGGABLE_REPLIES:
+        log_detail = f"HTTP {status}: {' '.join(response.text.split())[:300]}"
+    else:
+        log_detail = f"HTTP {status} (reply not logged: it may quote the request)"
     text = response.text.lower()
     if status in (401, 403):
-        return GatewayFailure("not_configured", detail)
-    if status == 402 or "budget" in text or "insufficient" in text or "credit" in text:
-        return GatewayFailure("budget", detail)
-    if status == 429:
-        return GatewayFailure("rate_limited", detail)
-    if 400 <= status < 500:
-        return GatewayFailure("bad_request", detail)
-    return GatewayFailure("unavailable", detail)
+        kind: FailureKind = "not_configured"
+    elif status == 402 or "budget" in text or "insufficient" in text or "credit" in text:
+        kind = "budget"
+    elif status == 429:
+        kind = "rate_limited"
+    elif 400 <= status < 500:
+        kind = "bad_request"
+    else:
+        kind = "unavailable"
+    return GatewayFailure(kind, detail, log_detail)
+
+
+def problem_places(error: ValidationError) -> str:
+    """Where a reply failed validation, e.g. `answers.criterion_0.score`. Never the values."""
+    places = {".".join(str(part) for part in problem["loc"]) for problem in error.errors()}
+    return ", ".join(sorted(places)[:10])
 
 
 def to_decimal(value: object) -> Decimal:
