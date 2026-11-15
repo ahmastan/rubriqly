@@ -1,6 +1,8 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { listRubrics } from '../lib/api'
+import { updateData } from '../lib/localStore'
+import { STARTER_RUBRICS } from '../lib/starterRubrics'
 import { renderRoute } from '../test/renderRoute'
 
 describe('Rubric builder', () => {
@@ -68,4 +70,53 @@ describe('Rubric builder', () => {
     await user.click(screen.getByRole('button', { name: 'Remove criterion' }))
     expect(within(nav).getAllByRole('button', { name: /^Untitled criterion/ })).toHaveLength(1)
   })
+
+  it('has no Import button until importing works', async () => {
+    await renderRoute('/rubrics/new')
+    await screen.findByRole('button', { name: 'Save rubric' })
+    expect(screen.queryByRole('button', { name: 'Import' })).not.toBeInTheDocument()
+  })
+
+  it('stops at 12 score criteria, the most the server can check', async () => {
+    const pack = STARTER_RUBRICS[0]
+    updateData((data) => {
+      data.rubrics.push({
+        ...pack,
+        id: 'too_big',
+        source: 'mine',
+        criteria: Array.from({ length: 13 }, (_, i) => ({ ...pack.criteria[0], id: `c${i}` })),
+      })
+    })
+    await renderRoute('/rubrics/too_big/edit')
+    // Marked as soon as it opens, and no more can be added.
+    expect(
+      await screen.findByText('A rubric can have at most 12 score criteria.'),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/13 of 12 score/)).toBeInTheDocument()
+    // Score criteria are full, but yes/no questions can still be added.
+    expect(screen.queryByRole('button', { name: '+ Add criterion' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '+ Add yes/no question' })).toBeEnabled()
+  })
+
+  it('shows every level even when two share a name', async () => {
+    const pack = STARTER_RUBRICS[0]
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    updateData((data) => {
+      data.rubrics.push({
+        ...pack,
+        id: 'same_names',
+        source: 'mine',
+        levels: ['Level', 'Level', 'Top'],
+        criteria: [{ ...pack.criteria[0], descriptors: ['a', 'b', 'c'], tips: ['x', 'y', 'z'] }],
+        checklist: [],
+      })
+    })
+    await renderRoute('/rubrics/same_names/edit')
+    expect(await screen.findAllByRole('textbox', { name: /what it looks like/ })).toHaveLength(3)
+    expect(errors.mock.calls.flat().join(' ')).not.toMatch(/same key/)
+  })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
 })

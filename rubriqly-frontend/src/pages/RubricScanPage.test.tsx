@@ -139,6 +139,16 @@ describe('Scanning a rubric', () => {
     expect(screen.getAllByRole('img', { name: /^Page/ })).toHaveLength(2)
   })
 
+  it('updates the scans left after a failed scan that still counts', async () => {
+    const { user } = await scanTwoPages()
+    expect(await screen.findByText('5 of 5 scans left this week.')).toBeInTheDocument()
+    fakeBackend.failNextScan(422, 'scan_not_a_rubric', 'This doesn’t look like a rubric.')
+    fakeBackend.setScansUsed(1)
+    await user.click(screen.getByRole('button', { name: 'Scan 2 pages' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent('doesn’t look like a rubric')
+    expect(await screen.findByText('4 of 5 scans left this week.')).toBeInTheDocument()
+  })
+
   it('stops at the weekly limit and says when the next scan is available', async () => {
     fakeBackend.setScansUsed(5)
     const { user } = await renderRoute('/rubrics/scan')

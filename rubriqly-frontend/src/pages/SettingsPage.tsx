@@ -4,6 +4,7 @@ import { useState, type FormEvent, type ReactNode } from 'react'
 import { useNavigate } from 'react-router'
 import { Avatar } from '../components/Sidebar'
 import { deleteLocalData, exportLocalData, PRIVACY_NOTICE } from '../lib/api'
+import { downloadFile } from '../lib/download'
 import { ACCOUNT_KEY, changePassword, deleteAccount, signOut, updateDisplayName } from '../lib/auth'
 import { useAccount, useThemePreference } from '../lib/hooks'
 import { setThemePreference, type ThemePreference } from '../lib/theme'
@@ -279,15 +280,11 @@ function DataSection() {
   })
 
   const onExport = () => {
-    const blob = new Blob([JSON.stringify(exportLocalData(account ?? undefined), null, 2)], {
-      type: 'application/json',
-    })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `rubriqly-data-${new Date().toISOString().slice(0, 10)}.json`
-    link.click()
-    URL.revokeObjectURL(url)
+    downloadFile(
+      JSON.stringify(exportLocalData(account ?? undefined), null, 2),
+      `rubriqly-data-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json',
+    )
   }
 
   return (

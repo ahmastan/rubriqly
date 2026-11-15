@@ -38,8 +38,10 @@ import {
   type BuilderValues,
 } from '../lib/builderForm'
 import { itemToJevQuestion, type BuilderItem } from '../lib/jevPayload'
+import { downloadFile } from '../lib/download'
 import { newId } from '../lib/localStore'
 import { hashUnit, mockCriterionScore } from '../lib/mockJev'
+import { RUBRIC_LIMITS, rubricProblem } from '../lib/rubricLimits'
 import { isSuggested, scannedToBuilderValues, type Suggestions } from '../lib/rubricScan'
 import { rubricToYaml } from '../lib/rubricYaml'
 import { SAMPLE_ESSAY } from '../lib/sampleEssay'
@@ -87,10 +89,20 @@ export function BuilderPage() {
     return <BuilderForm key="scan" initial={values} scan={details} />
   }
   const initial = rubric.data ? rubricToValues(rubric.data) : blankRubricValues()
-  return <BuilderForm key={rubricId ?? 'new'} initial={initial} />
+  // Rubrics saved before the builder had limits open with the problem already marked.
+  const tooBig = Boolean(rubric.data && rubricProblem(rubric.data))
+  return <BuilderForm key={rubricId ?? 'new'} initial={initial} checkOnOpen={tooBig} />
 }
 
-function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDetails }) {
+function BuilderForm({
+  initial,
+  scan,
+  checkOnOpen = false,
+}: {
+  initial: BuilderValues
+  scan?: ScanDetails
+  checkOnOpen?: boolean
+}) {
   const navigate = useNavigate()
   const location = useLocation()
   const queryClient = useQueryClient()
@@ -106,11 +118,25 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
     handleSubmit,
     getValues,
     reset,
+    trigger,
     formState: { errors, isDirty },
   } = form
   const { fields, append, remove, move } = useFieldArray({ control, name: 'items' })
   const [levels, version] = useWatch({ control, name: ['levels', 'version'] })
   const items = useWatch({ control, name: 'items' })
+  const scoreCount = items.filter((i) => i.kind === 'score').length
+  const yesNoCount = items.length - scoreCount
+  // New items are score criteria; once those are full, yes/no questions can still be added.
+  const addKind =
+    scoreCount < RUBRIC_LIMITS.criteria
+      ? 'score'
+      : yesNoCount < RUBRIC_LIMITS.checklist
+        ? 'yesno'
+        : undefined
+
+  useEffect(() => {
+    if (checkOnOpen) void trigger()
+  }, [checkOnOpen, trigger])
 
   const savedScan = useRef(false)
   const save = useMutation({
@@ -151,12 +177,7 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
   const exportYaml = () => {
     const values = getValues()
     const rubric = valuesToRubric(values, values.id || slugify(values.title))
-    const url = URL.createObjectURL(new Blob([rubricToYaml(rubric)], { type: 'text/yaml' }))
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `${slugify(values.title)}.yaml`
-    link.click()
-    URL.revokeObjectURL(url)
+    downloadFile(rubricToYaml(rubric), `${slugify(values.title)}.yaml`, 'text/yaml')
   }
 
   const sensors = useSensors(
@@ -214,14 +235,6 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
           </span>
         )}
         <span className="grow" />
-        <button
-          type="button"
-          disabled
-          title="Importing YAML needs the Rubriqly server, which isn’t connected yet."
-          className={buttonStyles.secondary}
-        >
-          Import
-        </button>
         <button type="button" onClick={exportYaml} className={buttonStyles.secondary}>
           Export YAML
         </button>
@@ -234,6 +247,12 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
           {errors.title.message}
         </p>
       )}
+      {/* Shown up top: the criteria list can be taller than the screen. */}
+      {errors.items?.root && (
+        <p role="alert" className="m-0 bg-warn-bg px-7 py-2 text-sm text-warn">
+          {errors.items.root.message}
+        </p>
+      )}
       {scan && <ScanBanner scan={scan} />}
 
       <div className="flex min-h-0 grow flex-col lg:flex-row">
@@ -241,7 +260,11 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
           aria-label="Criteria"
           className="flex shrink-0 flex-col gap-1 border-b border-divider px-3.5 py-5 lg:w-[240px] lg:border-r lg:border-b-0"
         >
-          <span className={cn(sectionLabel, 'px-2.5 pb-2')}>Criteria</span>
+          <span className={cn(sectionLabel, 'px-2.5')}>Criteria</span>
+          <span className="px-2.5 pb-2 text-xs text-ink-2">
+            {scoreCount} of {RUBRIC_LIMITS.criteria} score · {yesNoCount} of{' '}
+            {RUBRIC_LIMITS.checklist} yes/no
+          </span>
           <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
             <SortableContext items={fields.map((f) => f.id)} strategy={verticalListSortingStrategy}>
               <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -261,19 +284,15 @@ function BuilderForm({ initial, scan }: { initial: BuilderValues; scan?: ScanDet
           </DndContext>
           <button
             type="button"
+            disabled={addKind === undefined}
             onClick={() => {
-              append(emptyItem(levels.length))
+              append({ ...emptyItem(levels.length), kind: addKind ?? 'score' })
               setSelected(fields.length)
             }}
-            className="mt-2 h-10 cursor-pointer rounded-[10px] border border-dashed border-faint bg-transparent text-[13px] font-medium text-ink-soft hover:bg-surface"
+            className="mt-2 h-10 cursor-pointer rounded-[10px] border border-dashed border-faint bg-transparent text-[13px] font-medium text-ink-soft hover:bg-surface disabled:cursor-not-allowed disabled:opacity-60"
           >
-            + Add criterion
+            {addKind === 'yesno' ? '+ Add yes/no question' : '+ Add criterion'}
           </button>
-          {errors.items?.root && (
-            <p role="alert" className="m-0 px-2.5 pt-2 text-[13px] text-warn">
-              {errors.items.root.message}
-            </p>
-          )}
         </nav>
 
         <main className="flex min-w-0 grow flex-col gap-5 px-4 py-7 sm:px-8">
@@ -462,7 +481,8 @@ function LevelsTable({
       </div>
       {levels.map((level, l) => (
         <div
-          key={level}
+          // By position: two levels can share a name.
+          key={l}
           className="grid grid-cols-1 items-start gap-2 border-t border-divider px-[18px] py-3.5 first-of-type:border-t-0 md:grid-cols-[130px_minmax(0,1fr)_minmax(0,1fr)] md:gap-4"
         >
           <div className="flex flex-col gap-1.5 pt-1.5">
