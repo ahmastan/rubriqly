@@ -3,7 +3,9 @@
 import hashlib
 import hmac
 import threading
-from collections.abc import Callable
+from collections import Counter
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
@@ -76,6 +78,42 @@ class LoginThrottle:
             del self._failures[email]
             return None
         return entry
+
+
+class InFlight:
+    """Checks (or scans) that are still running, so the limits count them too.
+
+    A check's usage row is only written once Jev has answered, seconds later. Without this,
+    requests sent at the same moment would all pass the limits before any of them was recorded.
+    Kept in memory, like LoginThrottle: Rubriqly runs as a single server.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._by_user: Counter[str] = Counter()
+        self._total = 0
+
+    @contextmanager
+    def admit[T](self, user_id: str, refusal: Callable[[int, int], T | None]) -> Iterator[T | None]:
+        """Yields `refusal(running for this user, running site-wide)`; None means admitted.
+
+        The limits are checked and the slot taken in one step, so two requests can't both take
+        the last one. Keep the request inside the `with` until its usage row is committed.
+        """
+        with self._lock:
+            refused = refusal(self._by_user[user_id], self._total)
+            if refused is None:
+                self._by_user[user_id] += 1
+                self._total += 1
+        try:
+            yield refused
+        finally:
+            if refused is None:
+                with self._lock:
+                    self._by_user[user_id] -= 1
+                    if self._by_user[user_id] <= 0:
+                        del self._by_user[user_id]
+                    self._total -= 1
 
 
 def network_hash(request: Request, settings: Settings) -> str | None:

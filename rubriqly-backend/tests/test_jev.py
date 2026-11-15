@@ -300,3 +300,59 @@ def test_mode_picks_the_client() -> None:
 
 def test_app_uses_mock_unless_live() -> None:
     assert isinstance(create_app(Settings(_env_file=None)).state.jev, MockJevClient)
+
+
+# What failures leave in the logs
+
+
+def test_account_problems_are_logged_with_the_gateways_reason(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    client, _ = client_for(FakeGateway(httpx.Response(401, json={"error": "Invalid API key"})))
+    with pytest.raises(JevError):
+        evaluate(client)
+    assert "jev failed (not_configured): HTTP 401" in caplog.text
+    assert "Invalid API key" in caplog.text
+    assert API_KEY not in caplog.text
+
+
+def test_refused_requests_are_logged_without_the_reply(caplog: pytest.LogCaptureFixture) -> None:
+    # A 400 reply can quote what was sent: the student's draft.
+    caplog.set_level(logging.INFO)
+    reply = httpx.Response(400, json={"error": "bad state: 'A very private student sentence.'"})
+    client, _ = client_for(FakeGateway(reply))
+    with pytest.raises(JevError):
+        evaluate(client, "A very private student sentence.")
+    assert "jev failed (bad_request): HTTP 400" in caplog.text
+    assert "private student sentence" not in caplog.text
+
+
+def test_giving_up_after_retries_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    caplog.set_level(logging.INFO)
+    client, _ = client_for(FakeGateway(*[httpx.Response(503)] * 3))
+    with pytest.raises(JevError):
+        evaluate(client)
+    assert "jev failed (unavailable): HTTP 503" in caplog.text
+
+
+def test_unusable_replies_are_logged_by_place_not_content(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    caplog.set_level(logging.INFO)
+    body = json.loads(json.dumps(REAL_RESPONSE))
+    body["answers"]["thesis"]["score"] = "a very private value"
+    client, _ = client_for(FakeGateway(httpx.Response(200, json=body)))
+    with pytest.raises(JevError):
+        evaluate(client)
+    assert "answers.thesis" in caplog.text
+    assert "very private value" not in caplog.text
+
+
+@pytest.mark.parametrize("confidence", [1.5, -0.2, "high"])
+def test_a_confidence_that_isnt_a_probability_is_ignored(confidence: object) -> None:
+    body = json.loads(json.dumps(REAL_RESPONSE))
+    del body["answers"]["thesis"]["confidence"]
+    body["providerMetadata"]["typesafe"]["confidence"]["thesis"] = confidence
+    client, _ = client_for(FakeGateway(httpx.Response(200, json=body)))
+    assert evaluate(client).answers["thesis"].confidence is None

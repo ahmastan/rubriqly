@@ -1,5 +1,8 @@
+import asyncio
 import base64
 import json
+import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from decimal import Decimal
 
@@ -383,3 +386,43 @@ def test_a_model_the_gateway_refuses_is_a_setup_problem(student: TestClient, db:
     assert "Free tier" not in response.json()["detail"]["message"]
     assert rows(db)[0].status == "failed"
     assert student.get("/api/rubric-scans/quota").json()["used"] == 0
+
+
+# Scans sent at the same moment
+
+
+class SlowScanner(ScriptedScanner):
+    async def scan(self, images: list[ScanImage]) -> ScanResult:
+        await asyncio.sleep(0.2)
+        return await super().scan(images)
+
+
+def all_at_once(clients: list[TestClient]) -> list[int]:
+    with ThreadPoolExecutor(len(clients)) as pool:
+        return sorted(pool.map(lambda c: scan(c).status_code, clients))
+
+
+def test_scans_sent_at_once_cant_get_past_the_weekly_limit(
+    engine, settings: Settings, db: Session
+) -> None:
+    app = create_app(settings.model_copy(update={"rubric_scans_per_user_per_week": 2}))
+    client = sign_up(TestClient(app))
+    app.state.scanner = SlowScanner()
+    assert all_at_once([client] * 5) == [200, 200, 429, 429, 429]
+    assert sorted(row.status for row in rows(db)) == ["ok"] * 2 + ["rate_limited"] * 3
+
+
+def test_scans_sent_at_once_cant_get_past_the_site_limit(engine, settings: Settings) -> None:
+    app = create_app(settings.model_copy(update={"rubric_scans_per_day": 2}))
+    app.state.scanner = SlowScanner()
+    students = [sign_up(TestClient(app), f"test{n}@rubriqly.com") for n in (1, 2, 3, 4)]
+    assert all_at_once(students) == [200, 200, 429, 429]
+
+
+def test_outages_are_logged(
+    student: TestClient, scanner: ScriptedScanner, caplog: pytest.LogCaptureFixture
+) -> None:
+    caplog.set_level(logging.INFO)
+    scanner.error = spent("budget")
+    assert scan(student).status_code == 503
+    assert "scan failed: budget" in caplog.text

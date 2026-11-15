@@ -19,7 +19,7 @@ import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from rubriqly.config import Settings
-from rubriqly.gateway import GatewayFailure, post_with_retries, to_decimal
+from rubriqly.gateway import GatewayFailure, post_with_retries, problem_places, to_decimal
 from rubriqly.scan.models import (
     MAX_CHECKLIST,
     MAX_CRITERIA,
@@ -236,6 +236,9 @@ def parse_scan_response(body: object) -> ScanResult:
         error.market_cost_usd = market
         raise
     except (KeyError, IndexError, TypeError, AttributeError, ValueError, ValidationError) as error:
+        # What went wrong, never the reply itself: it holds the rubric's text.
+        where = f" at {problem_places(error)}" if isinstance(error, ValidationError) else ""
+        logger.warning("scan reply couldn't be used: %s%s", type(error).__name__, where)
         failed = ScanError("unavailable", f"unexpected response: {error!r}"[:500])
         failed.input_tokens, failed.output_tokens = input_tokens, output_tokens
         failed.market_cost_usd = market

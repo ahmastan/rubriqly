@@ -126,6 +126,11 @@ def paragraph_role(index: int, count: int) -> Role:
     return "body paragraph"
 
 
+def paragraph_labels(role: Role) -> dict[str, str]:
+    """Question key -> tag label, in the order they're asked, e.g. {"claim": "Claim", ...}."""
+    return {label.lower(): label for label in _QUESTIONS_BY_ROLE[role]}
+
+
 def paragraph_request(text: str, role: Role) -> tuple[dict[str, str], dict[str, Question]]:
     state = {"role": role, "paragraph": text}
     questions: dict[str, Question] = {

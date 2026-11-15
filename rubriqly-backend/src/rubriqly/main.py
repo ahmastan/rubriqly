@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import sessionmaker
 
 from rubriqly.api import auth, checks, health, rubric_scans
-from rubriqly.auth.limits import LoginThrottle
+from rubriqly.auth.limits import InFlight, LoginThrottle
 from rubriqly.config import Settings, get_settings
 from rubriqly.db import make_engine
 from rubriqly.jev import make_jev_client
@@ -37,6 +37,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.login_throttle = LoginThrottle(
         settings.login_failures_before_lock, settings.login_lock_minutes
     )
+    app.state.checks_in_flight = InFlight()
+    app.state.scans_in_flight = InFlight()
 
     app.add_middleware(
         CORSMiddleware,

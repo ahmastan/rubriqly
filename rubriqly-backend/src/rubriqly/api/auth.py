@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Request, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, EmailStr, Field, StringConstraints
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +24,7 @@ from rubriqly.auth.passwords import (
     verify_password,
 )
 from rubriqly.auth.sessions import COOKIE_NAME, create_session, end_all_sessions, end_session
+from rubriqly.config import Settings
 from rubriqly.db import utcnow
 from rubriqly.models import User
 
@@ -139,11 +140,7 @@ def login(
     email = normalize_email(body.email)
     attempts = throttle(request)
     if attempts.is_locked(email):
-        raise api_error(
-            429,
-            "too_many_attempts",
-            f"Too many attempts. Try again in {settings.login_lock_minutes} minutes.",
-        )
+        raise too_many_attempts(settings)
 
     user = db.scalars(select(User).where(User.email == email)).one_or_none()
     if user is None:
@@ -186,11 +183,40 @@ def update_profile(body: ProfileIn, current: CurrentUser, db: DbSession) -> User
     return user_out(current.user)
 
 
+def confirm_password(
+    request: Request, user: User, password: str, settings: Settings, wrong: str
+) -> None:
+    """Re-checks a signed-in user's password. Wrong guesses count with sign-in's, so someone at
+    a signed-in computer can't keep guessing here either."""
+    attempts = throttle(request)
+    if attempts.is_locked(user.email):
+        raise too_many_attempts(settings)
+    if not verify_password(password, user.password_hash)[0]:
+        attempts.record_failure(user.email)
+        raise api_error(400, "wrong_password", wrong)
+    attempts.clear(user.email)
+
+
+def too_many_attempts(settings: Settings) -> HTTPException:
+    return api_error(
+        429,
+        "too_many_attempts",
+        f"Too many attempts. Try again in {settings.login_lock_minutes} minutes.",
+    )
+
+
 @router.post("/password", status_code=204)
-def change_password(body: PasswordChangeIn, current: CurrentUser, db: DbSession) -> None:
+def change_password(
+    body: PasswordChangeIn,
+    request: Request,
+    current: CurrentUser,
+    db: DbSession,
+    settings: AppSettings,
+) -> None:
     user = current.user
-    if not verify_password(body.current_password, user.password_hash)[0]:
-        raise api_error(400, "wrong_password", "Your current password is incorrect.")
+    confirm_password(
+        request, user, body.current_password, settings, "Your current password is incorrect."
+    )
     problem = password_problem(body.new_password, user.email)
     if problem:
         raise api_error(400, "weak_password", problem)
@@ -203,13 +229,13 @@ def change_password(body: PasswordChangeIn, current: CurrentUser, db: DbSession)
 @router.delete("/me", status_code=204)
 def delete_account(
     body: DeleteAccountIn,
+    request: Request,
     response: Response,
     current: CurrentUser,
     db: DbSession,
     settings: AppSettings,
 ) -> None:
-    if not verify_password(body.password, current.user.password_hash)[0]:
-        raise api_error(400, "wrong_password", "Your password is incorrect.")
+    confirm_password(request, current.user, body.password, settings, "Your password is incorrect.")
     # Sessions and usage rows go with it (ON DELETE CASCADE).
     db.delete(current.user)
     db.commit()
