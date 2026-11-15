@@ -114,6 +114,8 @@ CI (`.github/workflows/ci.yml`) runs:
   - open-source claims stay accurate: the code is MIT on GitHub (`GITHUB_URL` in `content.ts`)
   - sample content is original and labeled as an example
 
+**npm override (temporary):** `package.json` `overrides` forces `minimatch` ^11.0.5 under `@typescript-eslint/typescript-estree`, which still asks for ^10 (a denial-of-service advisory, GHSA-g3hv-75wg-m249; dev tooling only). Remove it once `typescript-eslint` depends on minimatch 11 or newer, then run `npm install` and `npm audit`.
+
 **Lint rule to know:** `react-refresh/only-export-components` means a `.tsx` file may only export components. Put hooks, constants and helpers in `.ts` files.
 
 **Test conventions (`src/test/`)**
