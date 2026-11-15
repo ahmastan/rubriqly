@@ -1,7 +1,7 @@
 import type { Account } from './auth'
 import { buildCheckResult, rubricForScoring } from './checkResult'
 import { apiFetch } from './http'
-import { clearData, loadData, newId, updateData } from './localStore'
+import { clearData, ensureRoom, loadDamagedData, loadData, newId, updateData } from './localStore'
 import { STARTER_RUBRICS } from './starterRubrics'
 import { countWords, extractTitle, splitParagraphs } from './text'
 import { getThemePreference } from './theme'
@@ -35,12 +35,34 @@ export async function getRubric(id: string): Promise<Rubric> {
   return rubric
 }
 
+/**
+ * Everything that can change a check's result: the questions and level descriptions Jev
+ * receives, the number of levels, the weights and the word-count rule. Names, tips and
+ * summaries only change what students read, so they leave the version alone.
+ */
+function scoringContent(rubric: Rubric): string {
+  return JSON.stringify({
+    levels: rubric.levels.length,
+    criteria: rubric.criteria.map(({ id, question, descriptors, weight }) => ({
+      id,
+      question,
+      descriptors,
+      weight,
+    })),
+    checklist: rubric.checklist.map(({ id, question }) => ({ id, question })),
+    rules: rubric.rules,
+  })
+}
+
 export async function saveRubric(rubric: Rubric): Promise<Rubric> {
   const saved: Rubric = { ...rubric, source: 'mine' }
   updateData((data) => {
     const existing = data.rubrics.findIndex((r) => r.id === saved.id)
     if (existing >= 0) {
-      saved.version = data.rubrics[existing].version + 1
+      // A new version only when results could differ, so "Since draft N" keeps comparing.
+      const before = data.rubrics[existing]
+      const changed = scoringContent(before) !== scoringContent(saved)
+      saved.version = changed ? before.version + 1 : before.version
       data.rubrics[existing] = saved
     } else {
       data.rubrics.push(saved)
@@ -97,6 +119,10 @@ export async function listAssignments(): Promise<AssignmentSummary[]> {
 
 export async function runCheck(input: NewCheckInput): Promise<{ checkId: string }> {
   const rubric = await getRubric(input.rubricId)
+  // Scoring costs money and counts toward the daily limit, so make sure the result can be saved
+  // first (the draft, plus room for the result).
+  // The text is stored twice (the draft and its paragraphs), escaped as JSON.
+  ensureRoom(JSON.stringify(input.text).length * 2 + input.prompt.length + 20_000)
   // Nothing is saved unless scoring succeeds: a failed check leaves no draft behind.
   const response = await apiFetch<CheckResponse>('/api/checks', {
     method: 'POST',
@@ -188,6 +214,8 @@ export function exportLocalData(account?: Account) {
     },
     theme: getThemePreference(),
     ...loadData(),
+    // Saved data this browser couldn't read, exactly as it was stored (see localStore).
+    damagedData: loadDamagedData(),
   }
 }
 

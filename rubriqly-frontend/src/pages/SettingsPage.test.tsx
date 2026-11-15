@@ -1,5 +1,5 @@
 import { fireEvent, screen, waitFor, within } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { runCheck } from '../lib/api'
 import { loadData } from '../lib/localStore'
 import { SAMPLE_ESSAY } from '../lib/sampleEssay'
@@ -58,6 +58,21 @@ describe('Settings', () => {
     ).toBeVisible()
     expect(loadData().checks).toHaveLength(0)
     expect(await within(sidebar).findByText('Drafts you check will show up here.')).toBeVisible()
+  })
+
+  it('exports data without cancelling the download', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+    const revoke = vi.spyOn(URL, 'revokeObjectURL')
+    try {
+      const { user } = await renderRoute('/settings')
+      await user.click(await screen.findByRole('button', { name: /Export my data/ }))
+      expect(revoke).not.toHaveBeenCalled()
+      vi.advanceTimersByTime(60_000)
+      expect(revoke).toHaveBeenCalledTimes(1)
+    } finally {
+      revoke.mockRestore()
+      vi.useRealTimers()
+    }
   })
 
   it('changes the password', async () => {

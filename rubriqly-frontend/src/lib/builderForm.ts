@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { BuilderItem } from './jevPayload'
+import { charCount, RUBRIC_LIMITS as L } from './rubricLimits'
 import type { Rubric } from './types'
 
 export const DEFAULT_LEVELS = ['Beginning', 'Developing', 'Proficient', 'Exemplary']
@@ -114,12 +115,17 @@ export function valuesToRubric(values: BuilderValues, id: string): Rubric {
   }
 }
 
-const required = (what: string) => z.string().trim().min(1, `Add ${what}.`)
+const required = (what: string, max: number) =>
+  z
+    .string()
+    .trim()
+    .min(1, `Add ${what}.`)
+    .refine((s) => charCount(s) <= max, `Keep this to ${max} characters or fewer.`)
 
 export const builderSchema = z.object({
   id: z.string(),
   version: z.number(),
-  title: required('a rubric name'),
+  title: required('a rubric name', L.name),
   levels: z.array(z.string()).min(2),
   rules: z.custom<Rubric['rules']>(),
   items: z
@@ -127,9 +133,9 @@ export const builderSchema = z.object({
       z
         .object({
           id: z.string(),
-          name: required('a criterion name'),
+          name: required('a criterion name', L.name),
           kind: z.enum(['score', 'yesno']),
-          question: required('the question for Jev'),
+          question: required('the question for Jev', L.text),
           descriptors: z.array(z.string()),
           tips: z.array(z.string()),
         })
@@ -141,6 +147,12 @@ export const builderSchema = z.object({
                 code: 'custom',
                 path: ['descriptors', i],
                 message: 'Describe this level.',
+              })
+            else if (charCount(d.trim()) > L.text)
+              ctx.addIssue({
+                code: 'custom',
+                path: ['descriptors', i],
+                message: `Keep this to ${L.text} characters or fewer.`,
               })
           })
           item.tips.forEach((t, i) => {
@@ -156,5 +168,11 @@ export const builderSchema = z.object({
     .min(1, 'Add at least one criterion.')
     .refine((items) => items.some((i) => i.kind === 'score'), {
       message: 'Add at least one score criterion.',
+    })
+    .refine((items) => items.filter((i) => i.kind === 'score').length <= L.criteria, {
+      message: `A rubric can have at most ${L.criteria} score criteria.`,
+    })
+    .refine((items) => items.filter((i) => i.kind === 'yesno').length <= L.checklist, {
+      message: `A rubric can have at most ${L.checklist} yes/no questions.`,
     }),
 })

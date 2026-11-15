@@ -16,6 +16,7 @@ import { ACCOUNT_KEY } from '../lib/auth'
 import { FileReadError, readDraftFile } from '../lib/fileText'
 import { useSlow } from '../lib/hooks'
 import { ApiError } from '../lib/http'
+import { rubricProblem } from '../lib/rubricLimits'
 import { countWords } from '../lib/text'
 import type { Rubric } from '../lib/types'
 import { cn } from '../lib/ui'
@@ -64,7 +65,9 @@ function Composer({
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const [params] = useSearchParams()
-  const [promptOpen, setPromptOpen] = useState(false)
+  // "Check next draft" links here with the assignment, so its prompt carries over.
+  const startAssignment = assignments.find((a) => a.id === params.get('assignment'))
+  const [promptOpen, setPromptOpen] = useState(Boolean(startAssignment?.prompt))
   const [uploadMessage, setUploadMessage] = useState<string>()
   const [uploadNote, setUploadNote] = useState<string>()
   const [readingFile, setReadingFile] = useState<string>()
@@ -76,16 +79,20 @@ function Composer({
     register,
     control,
     handleSubmit,
+    getValues,
     setValue,
     formState: { errors },
   } = useForm<FormValues>({
     resolver: zodResolver(schema),
     defaultValues: {
-      rubricId: rubrics.find((r) => r.id === params.get('rubric'))?.id ?? rubrics[0]?.id ?? '',
-      prompt: '',
+      rubricId:
+        rubrics.find((r) => r.id === params.get('rubric'))?.id ??
+        rubrics.find((r) => r.id === startAssignment?.rubricId)?.id ??
+        rubrics[0]?.id ??
+        '',
+      prompt: startAssignment?.prompt ?? '',
       text: '',
-      assignmentId:
-        assignments.find((a) => a.id === params.get('assignment'))?.id ?? NEW_ASSIGNMENT,
+      assignmentId: startAssignment?.id ?? NEW_ASSIGNMENT,
     },
   })
 
@@ -97,6 +104,20 @@ function Composer({
   const words = countWords(text)
   const assignment = assignments.find((a) => a.id === assignmentId)
   const draftNumber = (assignment?.draftCount ?? 0) + 1
+  // Rubrics saved before the builder had limits can be too big for the server to check.
+  const rubricIssue = selectedRubric ? rubricProblem(selectedRubric) : undefined
+
+  // Switching assignment brings its prompt along, unless the student has typed their own.
+  const onAssignmentChange = (nextId: string) => {
+    // Same rubric as its earlier drafts, so "Since draft N" can compare them.
+    const nextRubric = assignments.find((a) => a.id === nextId)?.rubricId
+    if (rubrics.some((r) => r.id === nextRubric)) setValue('rubricId', nextRubric!)
+    const typed = getValues('prompt')
+    if (typed.trim() && typed !== (assignment?.prompt ?? '')) return
+    const nextPrompt = assignments.find((a) => a.id === nextId)?.prompt ?? ''
+    setValue('prompt', nextPrompt)
+    if (nextPrompt) setPromptOpen(true)
+  }
 
   const check = useMutation({
     mutationFn: runCheck,
@@ -113,13 +134,15 @@ function Composer({
   })
   const slow = useSlow(check.isPending, 8000)
 
-  const onSubmit = (values: FormValues) =>
+  const onSubmit = (values: FormValues) => {
+    if (rubricIssue) return
     check.mutate({
       rubricId: values.rubricId,
       prompt: values.prompt.trim(),
       text: values.text,
       assignmentId: values.assignmentId === NEW_ASSIGNMENT ? undefined : values.assignmentId,
     })
+  }
 
   const onFile = async (file: File | undefined) => {
     setUploadMessage(undefined)
@@ -255,7 +278,13 @@ function Composer({
                 </button>
               )}
 
-              <ChipSelect label={`Draft ${draftNumber} of`} showLabel {...register('assignmentId')}>
+              <ChipSelect
+                label={`Draft ${draftNumber} of`}
+                showLabel
+                {...register('assignmentId', {
+                  onChange: (e) => onAssignmentChange(e.target.value),
+                })}
+              >
                 <option value={NEW_ASSIGNMENT}>a new assignment</option>
                 {assignments.map((a) => (
                   <option key={a.id} value={a.id}>
@@ -304,9 +333,9 @@ function Composer({
               {slow && ' The server may be waking up; this can take a minute or two.'}
             </p>
           )}
-          {(error || uploadMessage || check.isError) && (
+          {(error || uploadMessage || rubricIssue || check.isError) && (
             <p role="alert" className="m-0 rounded-xl bg-warn-bg px-3.5 py-2 text-[13px] text-warn">
-              {error ?? uploadMessage ?? check.error?.message}
+              {error ?? uploadMessage ?? rubricIssue ?? check.error?.message}
             </p>
           )}
         </form>

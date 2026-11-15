@@ -33,6 +33,7 @@ class ChecklistItemIn(_Model):
     question: Text
 
 
+# The rubric builder enforces the same limits (rubriqly-frontend/src/lib/rubricLimits.ts).
 class RubricIn(_Model):
     id: Id
     version: Annotated[int, Field(ge=1)]

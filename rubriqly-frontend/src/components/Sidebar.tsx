@@ -200,11 +200,19 @@ export function Sidebar({
         title={`Delete “${pendingDelete?.name ?? ''}”?`}
         confirmLabel={remove.isPending ? 'Deleting…' : 'Delete'}
         onConfirm={() => pendingDelete && remove.mutate(pendingDelete)}
-        onCancel={() => setPendingDelete(undefined)}
+        onCancel={() => {
+          setPendingDelete(undefined)
+          remove.reset()
+        }}
       >
         This deletes{' '}
         {pendingDelete?.draftCount === 1 ? 'its draft' : `all ${pendingDelete?.draftCount} drafts`}{' '}
         along with the results from this device. It can’t be undone.
+        {remove.isError && (
+          <span role="alert" className="mt-2 block text-warn">
+            {remove.error.message}
+          </span>
+        )}
       </ConfirmDialog>
     </nav>
   )

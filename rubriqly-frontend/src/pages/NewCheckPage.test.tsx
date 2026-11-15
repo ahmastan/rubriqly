@@ -1,6 +1,7 @@
-import { fireEvent, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
-import { loadData } from '../lib/localStore'
+import { fireEvent, screen, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { runCheck } from '../lib/api'
+import { loadData, updateData } from '../lib/localStore'
 import { SAMPLE_ESSAY } from '../lib/sampleEssay'
 import { STARTER_RUBRICS } from '../lib/starterRubrics'
 import { fakeBackend, requests } from '../test/fakeBackend'
@@ -159,6 +160,86 @@ describe('Scoring on the server', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'Check draft' }))
     expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+  })
+})
+
+describe('Next draft', () => {
+  it('brings the assignment’s prompt along and sends it again', async () => {
+    await runCheck({ rubricId: STARTER_RUBRICS[0].id, prompt: 'Argue a side.', text: SAMPLE_ESSAY })
+    const assignment = loadData().assignments[0]
+    const { user } = await renderRoute(
+      `/check/new?assignment=${assignment.id}&rubric=${STARTER_RUBRICS[0].id}`,
+    )
+    expect(await screen.findByRole('textbox', { name: /assignment prompt/i })).toHaveValue(
+      'Argue a side.',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your draft' }), {
+      target: { value: SAMPLE_ESSAY },
+    })
+    await user.click(screen.getByRole('button', { name: 'Check draft' }))
+    await screen.findByText('An estimate to guide revision, not a grade.')
+    const sent = requests.filter((r) => r.path === '/api/checks').at(-1)!.body as { prompt: string }
+    expect(sent.prompt).toBe('Argue a side.')
+    expect(loadData().assignments[0].prompt).toBe('Argue a side.')
+  })
+
+  it('fills in the prompt and rubric when an assignment is picked', async () => {
+    await runCheck({ rubricId: STARTER_RUBRICS[1].id, prompt: 'Argue a side.', text: SAMPLE_ESSAY })
+    const { user } = await renderRoute('/check/new')
+    await user.selectOptions(
+      await screen.findByRole('combobox', { name: /^Draft 1 of/ }),
+      loadData().assignments[0].id,
+    )
+    expect(screen.getByRole('textbox', { name: /assignment prompt/i })).toHaveValue('Argue a side.')
+    expect(screen.getByRole('combobox', { name: /rubric/i })).toHaveValue(STARTER_RUBRICS[1].id)
+  })
+})
+
+describe('Rubrics too big to check', () => {
+  it('says what to fix and doesn’t send the draft', async () => {
+    const pack = STARTER_RUBRICS[0]
+    updateData((data) => {
+      data.rubrics.push({
+        ...pack,
+        id: 'too_big',
+        source: 'mine',
+        criteria: Array.from({ length: 13 }, (_, i) => ({ ...pack.criteria[0], id: `c${i}` })),
+      })
+    })
+    const { user } = await renderRoute('/check/new?rubric=too_big')
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'This rubric has 13 score criteria; the most that can be checked is 12.',
+    )
+    fireEvent.change(screen.getByRole('textbox', { name: 'Your draft' }), {
+      target: { value: SAMPLE_ESSAY },
+    })
+    await user.click(screen.getByRole('button', { name: 'Check draft' }))
+    expect(requests.some((r) => r.path === '/api/checks')).toBe(false)
+  })
+})
+
+describe('Storage full', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('explains it before scoring, and keeps the draft in the box', async () => {
+    await runCheck({ rubricId: STARTER_RUBRICS[0].id, prompt: '', text: SAMPLE_ESSAY })
+    const { user, router } = await renderRoute('/check/new')
+    const draft = await screen.findByRole('textbox', { name: 'Your draft' })
+    fireEvent.change(draft, { target: { value: SAMPLE_ESSAY } })
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('full', 'QuotaExceededError')
+    })
+    const checksBefore = requests.filter((r) => r.path === '/api/checks').length
+    await user.click(screen.getByRole('button', { name: 'Check draft' }))
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Your browser’s storage for Rubriqly is full',
+    )
+    await waitFor(() => expect(router.state.location.pathname).toBe('/check/new'))
+    expect(draft).toHaveValue(SAMPLE_ESSAY)
+    // The paid scoring call was never made.
+    expect(requests.filter((r) => r.path === '/api/checks')).toHaveLength(checksBefore)
   })
 })
 

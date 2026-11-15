@@ -6,6 +6,7 @@ import { getScanQuota, SCAN_PRIVACY_NOTICE, SCAN_QUOTA_KEY, scanRubric } from '.
 import { ACCOUNT_KEY } from '../lib/auth'
 import { useSlow } from '../lib/hooks'
 import { ApiError } from '../lib/http'
+import { newId } from '../lib/localStore'
 import { MAX_PHOTOS, preparePhoto } from '../lib/rubricScan'
 import type { ScanQuota } from '../lib/types'
 import { buttonStyles, cn, pageBar } from '../lib/ui'
@@ -43,7 +44,8 @@ export function RubricScanPage() {
       if (error instanceof ApiError && error.status === 401) {
         queryClient.setQueryData(ACCOUNT_KEY, null)
       }
-      if (error instanceof ApiError && error.code === 'weekly_scan_limit') {
+      // Some failed scans still count toward the week (e.g. "not a rubric"): show the new count.
+      if (error instanceof ApiError && error.status !== 401) {
         void queryClient.invalidateQueries({ queryKey: SCAN_QUOTA_KEY })
       }
     },
@@ -57,7 +59,7 @@ export function RubricScanPage() {
     const picked = all.filter((file) => file.type.startsWith('image/'))
     const room = MAX_PHOTOS - photos.length
     const added = picked.slice(0, Math.max(0, room)).map((file) => ({
-      key: crypto.randomUUID(),
+      key: newId('photo'),
       file,
       url: URL.createObjectURL(file),
     }))

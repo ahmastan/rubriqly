@@ -52,6 +52,8 @@ CI (`.github/workflows/ci.yml`) runs:
   - On sign-in or sign-out, call `queryClient.removeQueries()` and then set `ACCOUNT_KEY`.
   - A 401 on a check sets `ACCOUNT_KEY` to null.
 - **Storage:** `lib/localStore.ts` uses one key per account, `rubriqly:v1:<userId>`, set by `setStorageUser` (which `auth.ts` calls whenever the account is known). The first account to sign in on a browser takes over the pre-accounts `rubriqly:v1` data. It stores nothing while signed out.
+  - A save the browser refuses because storage is full throws `StorageFullError` (shown to the student; nothing is half-saved). `runCheck` calls `ensureRoom` first, so a paid check is never run only to be lost. Blocked storage (including a zero-quota private window) falls back to memory for the tab.
+  - Unreadable saved data is moved to `rubriqly:v1:<userId>:damaged:<time>` (included in "Export my data", removed by "Delete all data") instead of being overwritten. If there's no room to move it, saves throw `DamagedStorageError` rather than overwrite it.
 - **Checks:** `runCheck` POSTs `{rubric: rubricForScoring(rubric) (no tips), prompt, text}`. `lib/checkResult.ts` `buildCheckResult` combines the response with the rubric through `scoring.ts` (rounding, tips, overall) and the word-count rule. Nothing is saved if scoring fails.
 - **Uploads (`lib/fileText.ts`):** .docx, .pdf and .txt files are read in the browser; the file never leaves the device. The size limit is 5 MB.
   - .docx uses `mammoth`.
@@ -67,6 +69,8 @@ CI (`.github/workflows/ci.yml`) runs:
 
 **Domain logic, split so it's testable without React**
 - `lib/types.ts` mirrors the planned API shapes.
+- `lib/rubricLimits.ts`: `RUBRIC_LIMITS` mirror the backend's `RubricIn` (keep them in sync). The builder enforces them, and `rubricProblem` stops a check on an older rubric that's too big.
+- `saveRubric` bumps a rubric's `version` only when something that can change a result changes (questions and level descriptions, the number of levels, weights, the word-count rule), not for names or tips, so "Since draft N" keeps comparing.
 - `lib/starterRubrics.ts`: the three built-in rubrics (`source: 'builtin'`). User rubrics are `'mine'`, and saving a built-in creates a copy.
 - `lib/scoring.ts`:
   - `CONFIDENCE_THRESHOLD = 0.6`
