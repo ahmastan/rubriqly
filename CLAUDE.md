@@ -134,7 +134,7 @@ CI (`.github/workflows/ci.yml`) runs:
   - Server-side sessions: the `rubriqly_session` cookie (HttpOnly, SameSite=Lax, `Path=/api`, Secure in production) holds a random token, and the database stores only its SHA-256. Sessions slide for 30 days and are refreshed at most hourly.
   - Routes that need a user take `current: CurrentUser` (`auth/deps.py`).
   - Errors are `{"detail": {"code", "message"}}` via `api_error`.
-  - Sign-up requires `confirms_age` (self-declared, `MIN_AGE` 13) and `accepts_terms`. It's limited per network (HMAC of the address; set `CLIENT_IP_HEADER` behind a proxy, e.g. `x-forwarded-for` on Render) and site-wide per UTC day.
+  - Sign-up requires `confirms_age` (self-declared, `MIN_AGE` 13) and `accepts_terms`. It's limited per network (HMAC of the address, IPv6 grouped by /56; `CLIENT_IP_HEADER` names a header the proxy sets, `cf-connecting-ip` on Render, never `x-forwarded-for`, whose first entry visitors can fake. If the header is missing, those sign-ups share one network rather than trusting the connection address, which uvicorn takes from `X-Forwarded-For`) and site-wide per UTC day.
   - Wrong-password lockout is in memory (`LoginThrottle`), which is fine for one server. Changing the password and deleting the account re-check the password through the same lockout (`confirm_password`).
   - Admin CLI: `uv run rubriqly create-user|reset-password|deactivate-user|activate-user|list-users|usage`. Generated passwords are printed once and never written anywhere.
 - **Jev client (`rubriqly/jev/`):**
@@ -177,7 +177,7 @@ CI (`.github/workflows/ci.yml`) runs:
 - **API** (Python, root `rubriqly-backend`):
   - build `uv sync --frozen --no-dev`; start runs `alembic upgrade head`, then uvicorn with proxy headers (migrations run on every start)
   - health check `/api/health` (never touches the database)
-  - `JEV_MODE=live`, `SCAN_MODE=live`, `ENVIRONMENT=production`, `ALLOWED_ORIGINS` = the site's addresses, `CLIENT_IP_HEADER=x-forwarded-for`
+  - `JEV_MODE=live`, `SCAN_MODE=live`, `ENVIRONMENT=production`, `ALLOWED_ORIGINS` = the site's addresses, `CLIENT_IP_HEADER=cf-connecting-ip`
   - secrets: `DATABASE_URL` and `AI_GATEWAY_API_KEY` are `sync: false`; `SECRET_KEY` is `generateValue`
 - The frontend's `apiFetch` treats a non-JSON 200 (for example `index.html` when the rewrite is missing) as "can't reach the server".
 - Sign-in cookies and drafts are stored per site address, so two addresses for one site don't share them.

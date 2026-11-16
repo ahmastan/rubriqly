@@ -47,7 +47,7 @@ These protect the scoring budget. They're all settings (`rubriqly-backend/src/ru
 
 | Setting | Default |
 |---|---|
-| `SIGNUPS_PER_NETWORK_PER_DAY` | 5 |
+| `SIGNUPS_PER_NETWORK_PER_DAY` (a network is an IPv4 address or an IPv6 /56, read from `CLIENT_IP_HEADER`) | 5 |
 | `SIGNUPS_PER_DAY` (whole site) | 100 |
 | `CHECKS_PER_USER_PER_DAY` (successful checks only) | 30 |
 | `CHECKS_PER_DAY` (whole site; successful and failed) | 500 |

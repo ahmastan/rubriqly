@@ -2,6 +2,8 @@
 
 import hashlib
 import hmac
+import ipaddress
+import logging
 import threading
 from collections import Counter
 from collections.abc import Callable, Iterator
@@ -16,6 +18,8 @@ from sqlalchemy.orm import Session
 from rubriqly.config import Settings
 from rubriqly.db import utcnow
 from rubriqly.models import User
+
+logger = logging.getLogger(__name__)
 
 
 def start_of_utc_day(now: datetime) -> datetime:
@@ -116,18 +120,64 @@ class InFlight:
                     self._total -= 1
 
 
-def network_hash(request: Request, settings: Settings) -> str | None:
-    """A keyed hash of the visitor's address. The address itself is never stored."""
-    address = None
+# Shared buckets: every visitor in one of these counts as the same network, so the limit holds.
+MISSING_HEADER = "missing-header"
+NOT_AN_ADDRESS = "not-an-address"
+_warned_missing_header = False
+
+
+def client_address(request: Request, settings: Settings) -> str | None:
+    """The visitor's address: from `client_ip_header` behind a proxy, else the connection's.
+
+    The header must be one the proxy sets and visitors can't (on Render: `cf-connecting-ip`).
+    The first `X-Forwarded-For` entry is whatever the visitor sent, so it can be faked, and so is
+    the connection address when uvicorn trusts all proxy headers. So if the header is configured
+    but missing, all such requests share one bucket instead of trusting either.
+    """
+    global _warned_missing_header
     if settings.client_ip_header:
         value = request.headers.get(settings.client_ip_header, "")
-        address = value.split(",")[0].strip() or None
-    if address is None and request.client is not None:
-        address = request.client.host
+        address = value.split(",")[0].strip()
+        if address:
+            return address
+        if not _warned_missing_header:
+            # Never logs an address; a missing header means the proxy setup changed.
+            logger.warning(
+                "Requests arrive without the %s header; they share one sign-up network",
+                settings.client_ip_header,
+            )
+            _warned_missing_header = True
+        return MISSING_HEADER
+    return request.client.host if request.client is not None else None
+
+
+def network_of(address: str) -> str:
+    """What counts as one network: an IPv4 address, or an IPv6 /56 (what an internet provider
+    usually gives one home; a phone or home can switch freely between addresses inside it).
+    Anything that isn't an address shares one bucket."""
+    if address == MISSING_HEADER:
+        return address
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return NOT_AN_ADDRESS
+    if ip.version == 6:
+        embedded = ip.ipv4_mapped or ip.sixtofour
+        if embedded is None and int(ip) >> 32 == 0 and int(ip) > 1:
+            embedded = ipaddress.IPv4Address(int(ip) & 0xFFFFFFFF)  # ::a.b.c.d (old form)
+        if embedded is not None:
+            return str(embedded)
+        return str(ipaddress.ip_network(f"{ip}/56", strict=False))
+    return str(ip)
+
+
+def network_hash(request: Request, settings: Settings) -> str | None:
+    """A keyed hash of the visitor's network. The address itself is never stored."""
+    address = client_address(request, settings)
     if not address:
         return None
     key = settings.secret_key.get_secret_value().encode()
-    return hmac.new(key, address.encode(), hashlib.sha256).hexdigest()
+    return hmac.new(key, network_of(address).encode(), hashlib.sha256).hexdigest()
 
 
 def signup_limit_reached(db: Session, settings: Settings, network: str | None) -> str | None:

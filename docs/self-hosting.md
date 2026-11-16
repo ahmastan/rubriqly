@@ -93,3 +93,4 @@ Limits (checks per student and per day, sign-ups, word count) are environment va
 | `password authentication failed` | The connection string is wrong or its password was reset. Copy it again from Neon. |
 | Build fails at `uv sync --frozen` | Run `uv lock` in `rubriqly-backend`, commit `uv.lock`, push. |
 | Scoring says the budget is reached | Raise the Vercel budget or add AI Gateway credits. |
+| API log: `Requests arrive without the cf-connecting-ip header` | The proxy in front of the API changed, and those sign-ups now share one network (5 a day). Set `CLIENT_IP_HEADER` to a header the new proxy sets that visitors can't fake (not `x-forwarded-for`). |
