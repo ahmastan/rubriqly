@@ -67,6 +67,8 @@ services:
       uv run --no-sync alembic upgrade head &&
       uv run --no-sync uvicorn rubriqly.main:app --host 0.0.0.0 --port $PORT
       --proxy-headers --forwarded-allow-ips '*'
+    # (That makes the address in uvicorn's log the first X-Forwarded-For entry, which visitors can
+    # fake. Limits never use it; see CLIENT_IP_HEADER below.)
     # Never touches the database, so these checks don't keep Neon awake.
     healthCheckPath: /api/health
     autoDeployTrigger: checksPass
@@ -87,9 +89,11 @@ services:
       #   value: google/gemini-2.5-flash # newer Gemini models need paid gateway credits
       - key: ALLOWED_ORIGINS
         value: https://YOUR-SITE.example,https://YOUR-SITE-SERVICE.onrender.com
-      # The visitor's address for the sign-ups-per-network limit (checked after the first deploy).
+      # The visitor's address for the sign-ups-per-network limit. Cloudflare (in front of Render)
+      # sets this header and refuses requests that try to fake it. Don't use x-forwarded-for:
+      # its first entry is whatever the visitor sends.
       - key: CLIENT_IP_HEADER
-        value: x-forwarded-for
+        value: cf-connecting-ip
       # Secrets: Render asks for these (sync: false), or generates one. Never put them in this file.
       - key: DATABASE_URL
         sync: false # the Neon *production* connection string

@@ -41,8 +41,9 @@ class Settings(BaseSettings):
     login_lock_minutes: int = Field(default=15, gt=0)
     # Sign-up asks people to confirm they are at least this old (self-declared, not verified).
     min_age: int = Field(default=13, gt=0)
-    # Header holding the visitor's address behind Render's proxy (confirmed in phase H).
-    # Empty = use the direct connection's address.
+    # Header holding the visitor's address behind a proxy, set by the proxy so visitors can't
+    # fake it: `cf-connecting-ip` on Render (Cloudflare). Never `x-forwarded-for`, whose first
+    # entry is whatever the visitor sent. Empty = use the direct connection's address.
     client_ip_header: str = ""
 
     # Limits that protect the Jev budget (docs/architecture.md, "Limits"). Days are UTC days.

@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import Engine, select
 from sqlalchemy.orm import Session
 
+from rubriqly.auth.limits import network_of
 from rubriqly.auth.passwords import password_problem
 from rubriqly.auth.sessions import COOKIE_NAME, hash_token
 from rubriqly.config import Settings
@@ -16,7 +17,7 @@ from rubriqly.models import AuthSession, CheckUsage, User
 PASSWORD = "maple river quiet lamp"
 
 
-def signup(client: TestClient, **overrides: Any):
+def signup(client: TestClient, headers: dict[str, str] | None = None, **overrides: Any):
     body = {
         "display_name": "Test Student One",
         "email": "test1@rubriqly.com",
@@ -25,7 +26,7 @@ def signup(client: TestClient, **overrides: Any):
         "accepts_terms": True,
         **overrides,
     }
-    return client.post("/api/auth/signup", json=body)
+    return client.post("/api/auth/signup", json=body, headers=headers)
 
 
 def login(client: TestClient, email: str = "test1@rubriqly.com", password: str = PASSWORD):
@@ -129,6 +130,60 @@ def test_signups_per_network_limit(client_with) -> None:
     response = signup(client, email="c@rubriqly.com")
     assert response.status_code == 429
     assert error_code(response) == "signup_limit_network"
+
+
+def test_faked_forwarded_for_does_not_dodge_the_network_limit(client_with) -> None:
+    # On Render the proxy sets CF-Connecting-IP; X-Forwarded-For's first entry is up to the visitor.
+    client = client_with(signups_per_network_per_day=1, client_ip_header="cf-connecting-ip")
+    real = {"cf-connecting-ip": "198.51.100.20"}
+    first = signup(client, {**real, "x-forwarded-for": "203.0.113.1"}, email="a@rubriqly.com")
+    assert first.status_code == 201
+    second = signup(client, {**real, "x-forwarded-for": "203.0.113.2"}, email="b@rubriqly.com")
+    assert error_code(second) == "signup_limit_network"
+
+
+def test_different_visitors_count_separately(client_with) -> None:
+    client = client_with(signups_per_network_per_day=1, client_ip_header="cf-connecting-ip")
+    for i, address in enumerate(["198.51.100.20", "198.51.100.21"]):
+        response = signup(client, {"cf-connecting-ip": address}, email=f"{i}@rubriqly.com")
+        assert response.status_code == 201
+
+
+def test_one_ipv6_home_counts_as_one_network(client_with) -> None:
+    client = client_with(signups_per_network_per_day=1, client_ip_header="cf-connecting-ip")
+    home = signup(client, {"cf-connecting-ip": "2001:db8:1:200::a"}, email="a@rubriqly.com")
+    assert home.status_code == 201
+    # Another /64 inside the same /56: still the same home.
+    same_home = signup(client, {"cf-connecting-ip": "2001:db8:1:2ff::b"}, email="b@rubriqly.com")
+    assert error_code(same_home) == "signup_limit_network"
+    other_home = signup(client, {"cf-connecting-ip": "2001:db8:1:300::a"}, email="c@rubriqly.com")
+    assert other_home.status_code == 201
+
+
+@pytest.mark.parametrize(
+    ("address", "network"),
+    [
+        ("198.51.100.20", "198.51.100.20"),
+        ("2001:db8:1:2:3:4:5:6", "2001:db8:1::/56"),
+        ("::ffff:198.51.100.20", "198.51.100.20"),
+        ("2002:c633:6414::1", "198.51.100.20"),  # 6to4
+        ("::198.51.100.20", "198.51.100.20"),  # IPv4-compatible
+        ("not an address", "not-an-address"),
+        ("testclient", "not-an-address"),
+    ],
+)
+def test_network_of(address: str, network: str) -> None:
+    assert network_of(address) == network
+
+
+def test_missing_header_is_one_shared_network_even_with_a_faked_forwarded_for(client_with) -> None:
+    # If the proxy stops sending the header, the connection address (uvicorn trusts
+    # X-Forwarded-For) could be faked, so these sign-ups all count as one network.
+    client = client_with(signups_per_network_per_day=1, client_ip_header="cf-connecting-ip")
+    first = signup(client, {"x-forwarded-for": "203.0.113.1"}, email="a@rubriqly.com")
+    assert first.status_code == 201
+    second = signup(client, {"x-forwarded-for": "203.0.113.2"}, email="b@rubriqly.com")
+    assert error_code(second) == "signup_limit_network"
 
 
 def test_site_wide_signup_limit(client_with) -> None:
